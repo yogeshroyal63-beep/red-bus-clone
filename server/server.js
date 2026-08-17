@@ -1,6 +1,15 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+
+// dotenv was never required anywhere in this file, so every process.env.* read below
+// (MONGODB_URI, JWT_SECRET, CORS_ORIGINS, ADMIN_USER_IDS, TRAFFIC_API_KEY) only ever
+// saw real OS-level environment variables — a .env file created from .env.example
+// (which is exactly what that file tells you to do) was silently ignored. Most visibly,
+// a custom CORS_ORIGINS set there never took effect, so the server kept falling back to
+// the hardcoded ['http://localhost:4200','http://localhost:3000'] default no matter what
+// was in .env, producing a CORS error for anyone running the frontend anywhere else.
+require('dotenv').config();
 const bodyParser = require('body-parser');
 const { helmetMiddleware, globalLimiter } = require('./middleware/security');
 

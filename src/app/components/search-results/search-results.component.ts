@@ -4,8 +4,10 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize } from 'rxjs';
 import { BusService } from '../../services/bus.service';
 import { I18nService } from '../../services/i18n.service';
+import { ToastService } from '../../services/toast.service';
 import { Bus } from '../../models/bus.model';
 
 @Component({
@@ -342,7 +344,7 @@ export class SearchResultsComponent implements OnInit {
   ratingOptions = [{ val:4, label:'4+ stars'}, {val:3.5, label:'3.5+ stars'}, {val:3, label:'3+ stars'}];
 
   private destroyRef = inject(DestroyRef);
-  constructor(private route: ActivatedRoute, private busService: BusService, private router: Router, public i18n: I18nService) {}
+  constructor(private route: ActivatedRoute, private busService: BusService, private router: Router, public i18n: I18nService, private toast: ToastService) {}
 
   ngOnInit() {
     this.route.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
@@ -366,11 +368,27 @@ export class SearchResultsComponent implements OnInit {
 
   loadBuses() {
     this.loading = true;
-    this.busService.searchBuses({ from: this.from, to: this.to, date: this.date }).subscribe(buses => {
-      this.buses = buses;
-      this.applyFilters();
-      this.loading = false;
-    });
+    // Was: .subscribe(buses => { ...; this.loading = false; }) — no error handler at
+    // all, and `loading` was only ever cleared inside the success callback. bus.service's
+    // own catchError normally swallows failures into a local mock-data fallback, but any
+    // exception between receiving the response and that final line (or any future path
+    // that bypasses that fallback) left `loading` stuck true forever — skeleton shown
+    // indefinitely even though `buses`/`filteredBuses` had already settled to whatever
+    // they were going to be. finalize() guarantees loading always clears, and an explicit
+    // error handler surfaces a real failure instead of leaving the page silently stuck.
+    this.busService.searchBuses({ from: this.from, to: this.to, date: this.date })
+      .pipe(finalize(() => { this.loading = false; }))
+      .subscribe({
+        next: (buses) => {
+          this.buses = buses;
+          this.applyFilters();
+        },
+        error: () => {
+          this.buses = [];
+          this.filteredBuses = [];
+          this.toast.error(this.i18n.t('err.network'));
+        }
+      });
   }
 
   applyFilters() {
