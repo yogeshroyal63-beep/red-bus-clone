@@ -3,6 +3,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { I18nService } from '../../services/i18n.service';
 import { ToastService } from '../../services/toast.service';
+import { BookingService } from '../../services/booking.service';
+import { Booking } from '../../models/bus.model';
 
 @Component({
   selector: 'app-bus-tracking',
@@ -16,15 +18,22 @@ import { ToastService } from '../../services/toast.service';
           <h1><i class="fa fa-map-marked-alt"></i> {{i18n.t('tracking.title')}}</h1>
           <p>{{i18n.t('tracking.sub')}}</p>
           <div class="track-input-wrap">
-            <input type="text" [(ngModel)]="pnr" [placeholder]="i18n.t('tracking.pnrPlaceholder')" class="track-input">
-            <button class="rb-btn-primary" style="padding:14px 32px; font-size:15px;" (click)="trackBus()">
-              <i class="fa fa-search"></i> {{i18n.t('tracking.trackBtn')}}
+            <input type="text" [(ngModel)]="pnr" [placeholder]="i18n.t('tracking.pnrPlaceholder')" class="track-input" (keyup.enter)="trackBus()">
+            <button class="rb-btn-primary" style="padding:14px 32px; font-size:15px;" [disabled]="loading" (click)="trackBus()">
+              <i class="fa" [class.fa-search]="!loading" [class.fa-spinner]="loading" [class.fa-spin]="loading"></i> {{i18n.t('tracking.trackBtn')}}
             </button>
           </div>
         </div>
       </div>
 
-      <div class="container" style="padding:32px 16px 64px;" *ngIf="tracked">
+      <div class="container" style="padding:32px 16px 0;" *ngIf="notFound">
+        <div class="rb-card" style="padding:32px; text-align:center;">
+          <i class="fa fa-exclamation-circle fa-2x" style="color:#d84e55;"></i>
+          <p style="margin-top:12px; font-weight:600;">{{i18n.t('tracking.pnrNotFound')}}</p>
+        </div>
+      </div>
+
+      <div class="container" style="padding:32px 16px 64px;" *ngIf="tracked && booking">
         <div class="track-layout">
           <!-- Live Map Placeholder -->
           <div class="map-panel rb-card">
@@ -37,26 +46,29 @@ import { ToastService } from '../../services/toast.service';
                 <div class="map-road map-road-h"></div>
                 <div class="map-road map-road-v"></div>
                 <div class="map-road map-road-d"></div>
-                <div class="bus-marker" [style.left]="busX+'%'" [style.top]="busY+'%'">
+                <div class="bus-marker" [style.left]="busX+'%'" [style.top]="busY+'%'" *ngIf="stage==='in_transit'">
                   <div class="bus-icon-map"><i class="fa fa-bus"></i></div>
                   <div class="bus-pulse"></div>
                 </div>
-                <div class="city-dot" style="left:15%;top:75%;"><span class="city-label">Bangalore</span></div>
-                <div class="city-dot" style="left:80%;top:20%;"><span class="city-label">Chennai</span></div>
+                <div class="city-dot" style="left:15%;top:75%;"><span class="city-label">{{booking.from}}</span></div>
+                <div class="city-dot" style="left:80%;top:20%;"><span class="city-label">{{booking.to}}</span></div>
               </div>
             </div>
+            <!-- No live GPS feed exists for this booking — the map above shows the
+                 booked route's endpoints only. Everything below is derived from the
+                 real booking record (departure/arrival time vs. now), not invented. -->
             <div class="map-footer flex-between">
               <div>
-                <div class="fs-12 text-grey">{{i18n.t('tracking.currentLocation')}}</div>
-                <div class="fw-600 fs-14">Near Krishnagiri, NH48</div>
+                <div class="fs-12 text-grey">{{i18n.t('tracking.status')}}</div>
+                <div class="fw-600 fs-14" [class.text-green]="stage==='in_transit'">{{stageLabel}}</div>
               </div>
               <div>
                 <div class="fs-12 text-grey">{{i18n.t('tracking.etaDestination')}}</div>
-                <div class="fw-600 fs-14 text-green">2h 15m</div>
+                <div class="fw-600 fs-14 text-green">{{booking.arrivalTime}}</div>
               </div>
               <div>
-                <div class="fs-12 text-grey">{{i18n.t('tracking.currentSpeed')}}</div>
-                <div class="fw-600 fs-14">72 km/h</div>
+                <div class="fs-12 text-grey">{{i18n.t('tracking.pnr')}}</div>
+                <div class="fw-600 fs-14">{{booking.pnr}}</div>
               </div>
             </div>
           </div>
@@ -72,35 +84,43 @@ import { ToastService } from '../../services/toast.service';
                 </div>
                 <div class="jp-cities flex-between" style="margin-top:8px;">
                   <div class="jp-city">
-                    <div class="jp-dot done"></div>
-                    <div class="fw-600 fs-13">Bangalore</div>
-                    <div class="fs-11 text-grey">{{i18n.t('tracking.departed')}} 21:30</div>
+                    <div class="jp-dot" [class.done]="stage!=='upcoming'"></div>
+                    <div class="fw-600 fs-13">{{booking.from}}</div>
+                    <div class="fs-11 text-grey">{{i18n.t('tracking.departed')}} {{booking.departureTime}}</div>
                   </div>
                   <div class="jp-city" style="text-align:center;">
-                    <div class="jp-dot current" style="margin:0 auto;"></div>
-                    <div class="fw-600 fs-13">Krishnagiri</div>
-                    <div class="fs-11 text-grey">{{i18n.t('tracking.inTransit')}}</div>
+                    <div class="jp-dot" [class.current]="stage==='in_transit'" style="margin:0 auto;"></div>
+                    <div class="fw-600 fs-13">{{i18n.t('tracking.inTransit')}}</div>
+                    <div class="fs-11 text-grey">{{stageLabel}}</div>
                   </div>
                   <div class="jp-city" style="text-align:right;">
-                    <div class="jp-dot" style="margin-left:auto;"></div>
-                    <div class="fw-600 fs-13">Chennai</div>
-                    <div class="fs-11 text-grey">{{i18n.t('tracking.eta')}} 06:00</div>
+                    <div class="jp-dot" [class.done]="stage==='completed'" style="margin-left:auto;"></div>
+                    <div class="fw-600 fs-13">{{booking.to}}</div>
+                    <div class="fs-11 text-grey">{{i18n.t('tracking.eta')}} {{booking.arrivalTime}}</div>
                   </div>
                 </div>
 
-                <!-- Stops timeline -->
+                <!-- Stops timeline — only the two real stops this app actually knows
+                     (boarding/dropping points on the booking). Intermediate waypoints
+                     were previously invented city names with no backing data; this app
+                     has no live GPS feed, so we don't fabricate a position between them. -->
                 <div class="stops-timeline" style="margin-top:24px;">
-                  <div class="stop-item" *ngFor="let stop of stops" [class.done]="stop.done" [class.current]="stop.current">
+                  <div class="stop-item" [class.done]="stage!=='upcoming'" [class.current]="stage==='in_transit'">
                     <div class="stop-dot"></div>
                     <div class="stop-info">
-                      <div class="stop-name fw-600">{{stop.name}}</div>
-                      <div class="stop-time fs-12 text-grey">
-                        <i class="fa fa-clock"></i>
-                        {{stop.done ? (i18n.t('tracking.passedAt') + ' ' + stop.actual) : (i18n.t('tracking.eta') + ' ' + stop.eta)}}
-                      </div>
+                      <div class="stop-name fw-600">{{booking.boardingPoint}}</div>
+                      <div class="stop-time fs-12 text-grey"><i class="fa fa-clock"></i> {{i18n.t('tracking.eta')}} {{booking.departureTime}}</div>
                     </div>
-                    <div class="stop-status" *ngIf="stop.done"><i class="fa fa-check-circle text-green"></i></div>
-                    <div class="stop-status live-anim" *ngIf="stop.current"><i class="fa fa-circle text-red"></i></div>
+                    <div class="stop-status" *ngIf="stage!=='upcoming'"><i class="fa fa-check-circle text-green"></i></div>
+                  </div>
+                  <div class="stop-item" [class.done]="stage==='completed'">
+                    <div class="stop-dot"></div>
+                    <div class="stop-info">
+                      <div class="stop-name fw-600">{{booking.droppingPoint}}</div>
+                      <div class="stop-time fs-12 text-grey"><i class="fa fa-clock"></i> {{i18n.t('tracking.eta')}} {{booking.arrivalTime}}</div>
+                    </div>
+                    <div class="stop-status" *ngIf="stage==='completed'"><i class="fa fa-check-circle text-green"></i></div>
+                    <div class="stop-status live-anim" *ngIf="stage==='in_transit'"><i class="fa fa-circle text-red"></i></div>
                   </div>
                 </div>
               </div>
@@ -109,9 +129,32 @@ import { ToastService } from '../../services/toast.service';
             <div class="rb-card">
               <div class="card-title-bar fw-700"><i class="fa fa-bus"></i> {{i18n.t('tracking.busDetails')}}</div>
               <div style="padding:16px;">
-                <div class="detail-row flex-between" *ngFor="let d of busDetails">
-                  <span class="fs-13 text-grey">{{d.label}}</span>
-                  <span class="fs-13 fw-600">{{d.value}}</span>
+                <!-- Only fields the booking record actually has. Driver name/mobile and
+                     bus registration number used to be fabricated here — this app never
+                     collects that data, so we don't display it as if it were real. -->
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('tracking.operator')}}</span>
+                  <span class="fs-13 fw-600">{{booking.busName}}</span>
+                </div>
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('tracking.route')}}</span>
+                  <span class="fs-13 fw-600">{{booking.from}} → {{booking.to}}</span>
+                </div>
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('tracking.boardingPoint')}}</span>
+                  <span class="fs-13 fw-600">{{booking.boardingPoint}}</span>
+                </div>
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('tracking.droppingPoint')}}</span>
+                  <span class="fs-13 fw-600">{{booking.droppingPoint}}</span>
+                </div>
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('search.date')}}</span>
+                  <span class="fs-13 fw-600">{{booking.date}}</span>
+                </div>
+                <div class="detail-row flex-between">
+                  <span class="fs-13 text-grey">{{i18n.t('tracking.bookingStatus')}}</span>
+                  <span class="fs-13 fw-600">{{booking.status | titlecase}}</span>
                 </div>
               </div>
             </div>
@@ -181,38 +224,83 @@ import { ToastService } from '../../services/toast.service';
 export class BusTrackingComponent {
   i18n = inject(I18nService);
   private toast = inject(ToastService);
-  pnr = ''; tracked = false;
-  busX = 42; busY = 55; progress = 45;
+  private bookingService = inject(BookingService);
 
-  stops = [
-    { name: 'Majestic Bus Stand, Bangalore', eta: '21:30', actual: '21:28', done: true, current: false },
-    { name: 'Hosur Road (Silk Board)', eta: '21:55', actual: '21:52', done: true, current: false },
-    { name: 'Hosur Toll Plaza', eta: '22:30', actual: '22:35', done: true, current: false },
-    { name: 'Krishnagiri', eta: '00:30', actual: '', done: false, current: true },
-    { name: 'Vellore', eta: '02:15', actual: '', done: false, current: false },
-    { name: 'Ranipet', eta: '03:30', actual: '', done: false, current: false },
-    { name: 'CMBT, Chennai', eta: '06:00', actual: '', done: false, current: false },
-  ];
+  pnr = '';
+  loading = false;
+  tracked = false;
+  notFound = false;
+  booking: Booking | null = null;
+  busX = 15; busY = 75;
 
-  busDetails = [
-    { label: 'Bus Number', value: 'KA 01 AB 1234' },
-    { label: 'Operator', value: 'VRL Travels' },
-    { label: 'Bus Type', value: 'Multi-Axle Semi Sleeper' },
-    { label: 'Driver', value: 'Suresh Kumar' },
-    { label: 'Driver Mobile', value: '+91 98765 43210' },
-    { label: 'Journey Date', value: new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) },
-  ];
+  /** 'upcoming' | 'in_transit' | 'completed' | 'cancelled', derived from the real
+   *  booking's date/departureTime/arrivalTime vs. the current time — not invented. */
+  stage: 'upcoming' | 'in_transit' | 'completed' | 'cancelled' = 'upcoming';
+  progress = 0;
+
+  get stageLabel(): string {
+    if (this.stage === 'cancelled') return this.i18n.t('tracking.cancelled');
+    if (this.stage === 'upcoming') return this.i18n.t('tracking.notDeparted');
+    if (this.stage === 'completed') return this.i18n.t('tracking.arrived');
+    return this.i18n.t('tracking.inTransit');
+  }
 
   trackBus() {
-    if (!this.pnr.trim()) { this.toast.error(this.i18n.t('tracking.invalidPnr')); return; }
-    this.tracked = true;
-    // Animate bus movement
-    let x = 15; let y = 75;
-    const interval = setInterval(() => {
-      x += 0.8; y -= 0.7;
-      this.busX = Math.min(x, 80);
-      this.busY = Math.max(y, 20);
-      if (x >= 80) clearInterval(interval);
-    }, 100);
+    const pnr = this.pnr.trim();
+    if (!pnr) { this.toast.error(this.i18n.t('tracking.invalidPnr')); return; }
+
+    this.loading = true;
+    this.tracked = false;
+    this.notFound = false;
+
+    // Findings #31: this used to skip lookup entirely and animate a hardcoded fake
+    // bus (fixed Bangalore→Chennai path via "Krishnagiri", driver "Suresh Kumar",
+    // etc.) for ANY non-empty input. It now resolves the real booking via the same
+    // PNR endpoint the booking-confirmation page uses, and only shows tracking data
+    // once a real booking is found.
+    this.bookingService.getByPnr(pnr).subscribe({
+      next: (booking) => {
+        this.loading = false;
+        this.booking = booking;
+        this.tracked = true;
+        this.computeStage(booking);
+        if (this.stage === 'in_transit') {
+          this.busX = 15 + (this.progress / 100) * 65;
+          this.busY = 75 - (this.progress / 100) * 55;
+        }
+      },
+      error: () => {
+        this.loading = false;
+        this.notFound = true;
+      }
+    });
+  }
+
+  private computeStage(booking: Booking) {
+    if (booking.status === 'cancelled') { this.stage = 'cancelled'; this.progress = 0; return; }
+
+    const departure = this.parseDateTime(booking.date, booking.departureTime);
+    const arrival = this.parseDateTime(booking.date, booking.arrivalTime);
+    // Overnight journeys: arrival time-of-day earlier than departure means next day.
+    if (arrival.getTime() <= departure.getTime()) arrival.setDate(arrival.getDate() + 1);
+
+    const now = Date.now();
+    if (now < departure.getTime()) {
+      this.stage = 'upcoming'; this.progress = 0;
+    } else if (now >= arrival.getTime()) {
+      this.stage = 'completed'; this.progress = 100;
+    } else {
+      this.stage = 'in_transit';
+      const total = arrival.getTime() - departure.getTime();
+      const elapsed = now - departure.getTime();
+      this.progress = Math.min(99, Math.max(1, Math.round((elapsed / total) * 100)));
+    }
+  }
+
+  private parseDateTime(date: string, time: string): Date {
+    const d = new Date(date);
+    const [h, m] = (time || '00:00').split(':').map(Number);
+    d.setHours(h || 0, m || 0, 0, 0);
+    return d;
   }
 }

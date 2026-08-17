@@ -22,9 +22,9 @@ import { I18nService } from '../../services/i18n.service';
             <!-- Search Widget -->
             <div class="search-widget rb-card">
               <div class="search-tabs">
-                <button class="tab active"><i class="fa fa-bus"></i> Bus Tickets</button>
-                <button class="tab"><i class="fa fa-building"></i> Hotel</button>
-                <button class="tab"><i class="fa fa-car"></i> Cabs</button>
+                <button class="tab active"><i class="fa fa-bus"></i> {{i18n.t('nav.bus')}}</button>
+                <button class="tab"><i class="fa fa-building"></i> {{i18n.t('home.tabs.hotel')}}</button>
+                <button class="tab"><i class="fa fa-car"></i> {{i18n.t('home.tabs.cabs')}}</button>
               </div>
               <div class="search-form">
                 <div class="search-row">
@@ -32,23 +32,23 @@ import { I18nService } from '../../services/i18n.service';
                     <label>{{i18n.t('search.from')}}</label>
                     <div class="search-field">
                       <i class="fa fa-map-marker-alt field-icon"></i>
-                      <input type="text" [(ngModel)]="from" placeholder="Enter origin city" class="city-input" aria-label="From city" role="combobox" aria-autocomplete="list" [attr.aria-expanded]="showFromDD" (input)="filterFromCities($event)" (focus)="showFromDD=true" (blur)="hideDD('from')" (keydown)="onFromKey($event)" autocomplete="off">
-                      <div class="city-dropdown" *ngIf="showFromDD && filteredFromCities.length" role="listbox" aria-label="City suggestions">
+                      <input type="text" [(ngModel)]="from" [placeholder]="i18n.t('home.search.fromPlaceholder')" class="city-input" [attr.aria-label]="i18n.t('home.search.fromAria')" role="combobox" aria-autocomplete="list" [attr.aria-expanded]="showFromDD" (input)="filterFromCities($event)" (focus)="showFromDD=true" (blur)="hideDD('from')" (keydown)="onFromKey($event)" autocomplete="off">
+                      <div class="city-dropdown" *ngIf="showFromDD && filteredFromCities.length" role="listbox" [attr.aria-label]="i18n.t('home.search.citySuggestions')">
                         <div class="city-item" *ngFor="let city of filteredFromCities; let i=index; trackBy: trackByIndex" role="option" [class.highlighted]="i===fromHighlight" [attr.aria-selected]="i===fromHighlight" (mousedown)="selectFrom(city)">
                           <i class="fa fa-map-marker-alt"></i> {{city}}
                         </div>
                       </div>
                     </div>
                   </div>
-                  <button class="swap-btn" (click)="swapCities()" title="Swap cities" aria-label="Swap origin and destination">
+                  <button class="swap-btn" (click)="swapCities()" [attr.title]="i18n.t('home.search.swapTitle')" [attr.aria-label]="i18n.t('home.search.swapAria')">
                     <i class="fa fa-exchange-alt"></i>
                   </button>
                   <div class="field-wrap">
                     <label>{{i18n.t('search.to')}}</label>
                     <div class="search-field">
                       <i class="fa fa-map-marker-alt field-icon"></i>
-                      <input type="text" [(ngModel)]="to" placeholder="Enter destination city" class="city-input" aria-label="To city" role="combobox" aria-autocomplete="list" [attr.aria-expanded]="showToDD" (input)="filterToCities($event)" (focus)="showToDD=true" (blur)="hideDD('to')" (keydown)="onToKey($event)" autocomplete="off">
-                      <div class="city-dropdown" *ngIf="showToDD && filteredToCities.length" role="listbox" aria-label="City suggestions">
+                      <input type="text" [(ngModel)]="to" [placeholder]="i18n.t('home.search.toPlaceholder')" class="city-input" [attr.aria-label]="i18n.t('home.search.toAria')" role="combobox" aria-autocomplete="list" [attr.aria-expanded]="showToDD" (input)="filterToCities($event)" (focus)="showToDD=true" (blur)="hideDD('to')" (keydown)="onToKey($event)" autocomplete="off">
+                      <div class="city-dropdown" *ngIf="showToDD && filteredToCities.length" role="listbox" [attr.aria-label]="i18n.t('home.search.citySuggestions')">
                         <div class="city-item" *ngFor="let city of filteredToCities; let i=index; trackBy: trackByIndex" role="option" [class.highlighted]="i===toHighlight" [attr.aria-selected]="i===toHighlight" (mousedown)="selectTo(city)">
                           <i class="fa fa-map-marker-alt"></i> {{city}}
                         </div>
@@ -56,14 +56,14 @@ import { I18nService } from '../../services/i18n.service';
                     </div>
                   </div>
                   <div class="field-wrap">
-                    <label>DATE OF JOURNEY</label>
+                    <label>{{i18n.t('search.date')}}</label>
                     <div class="search-field">
                       <i class="fa fa-calendar field-icon"></i>
-                      <input type="date" [(ngModel)]="date" [min]="today" class="date-input" aria-label="Journey date">
+                      <input type="date" [(ngModel)]="date" [min]="today" class="date-input" [attr.aria-label]="i18n.t('home.search.dateAria')">
                     </div>
                   </div>
                   <div class="field-wrap">
-                    <label>PASSENGERS</label>
+                    <label>{{i18n.t('search.passengers')}}</label>
                     <div class="search-field">
                       <i class="fa fa-users field-icon"></i>
                       <select [(ngModel)]="passengers" class="pass-select">
@@ -74,14 +74,14 @@ import { I18nService } from '../../services/i18n.service';
                       </select>
                     </div>
                   </div>
-                  <button class="search-btn rb-btn-primary" (click)="searchBuses()" aria-label="Search available buses">
-                    <i class="fa fa-search"></i> SEARCH BUSES
+                  <button class="search-btn rb-btn-primary" (click)="searchBuses()" [attr.aria-label]="i18n.t('home.search.searchAria')">
+                    <i class="fa fa-search"></i> {{i18n.t('search.btn')}}
                   </button>
                 </div>
               </div>
               <!-- Recent searches -->
               <div class="recent-searches" *ngIf="recentSearches.length">
-                <span class="rs-label">Recent:</span>
+                <span class="rs-label">{{i18n.t('home.search.recent')}}</span>
                 <span class="rs-item" *ngFor="let s of recentSearches" (click)="applyRecent(s)">
                   {{s.from}} → {{s.to}}
                 </span>
@@ -90,13 +90,13 @@ import { I18nService } from '../../services/i18n.service';
 
             <!-- Quick stats -->
             <div class="quick-stats">
-              <div class="stat-item"><span class="stat-num">2000+</span><span class="stat-lbl">Routes</span></div>
+              <div class="stat-item"><span class="stat-num">2000+</span><span class="stat-lbl">{{i18n.t('home.stats.routes')}}</span></div>
               <div class="stat-divider"></div>
-              <div class="stat-item"><span class="stat-num">3500+</span><span class="stat-lbl">Bus Operators</span></div>
+              <div class="stat-item"><span class="stat-num">3500+</span><span class="stat-lbl">{{i18n.t('home.stats.operators')}}</span></div>
               <div class="stat-divider"></div>
-              <div class="stat-item"><span class="stat-num">25M+</span><span class="stat-lbl">Customers</span></div>
+              <div class="stat-item"><span class="stat-num">25M+</span><span class="stat-lbl">{{i18n.t('home.stats.customers')}}</span></div>
               <div class="stat-divider"></div>
-              <div class="stat-item"><span class="stat-num">60K+</span><span class="stat-lbl">Bus Routes Daily</span></div>
+              <div class="stat-item"><span class="stat-num">60K+</span><span class="stat-lbl">{{i18n.t('home.stats.dailyRoutes')}}</span></div>
             </div>
           </div>
         </div>
@@ -107,8 +107,8 @@ import { I18nService } from '../../services/i18n.service';
     <section class="section-pad">
       <div class="container">
         <div class="section-header flex-between">
-          <h2 class="section-title">Exclusive Offers <span class="badge-orange" style="font-size:12px; vertical-align:middle; margin-left:8px;">LIMITED</span></h2>
-          <a href="#" class="view-all-link">View All Offers <i class="fa fa-chevron-right"></i></a>
+          <h2 class="section-title">{{i18n.t('home.offers.title')}} <span class="badge-orange" style="font-size:12px; vertical-align:middle; margin-left:8px;">{{i18n.t('home.offers.limited')}}</span></h2>
+          <a href="#" class="view-all-link">{{i18n.t('home.offers.viewAll')}} <i class="fa fa-chevron-right"></i></a>
         </div>
         <div class="offers-grid">
           <div class="offer-card" *ngFor="let offer of offers; trackBy: trackByIndex">
@@ -165,7 +165,7 @@ import { I18nService } from '../../services/i18n.service';
     <!-- Operators -->
     <section class="section-pad" style="background:var(--bg-card); padding: 40px 0;">
       <div class="container">
-        <h2 class="section-title" style="margin-bottom:28px; text-align:center;">Top Bus Operators</h2>
+        <h2 class="section-title" style="margin-bottom:28px; text-align:center;">{{i18n.t('home.operators.title')}}</h2>
         <div class="operators-grid">
           <div class="operator-item" *ngFor="let op of operators">{{op}}</div>
         </div>
@@ -175,7 +175,7 @@ import { I18nService } from '../../services/i18n.service';
     <!-- Testimonials -->
     <section class="section-pad">
       <div class="container">
-        <h2 class="section-title" style="margin-bottom:28px;">What Our Customers Say</h2>
+        <h2 class="section-title" style="margin-bottom:28px;">{{i18n.t('home.testimonials.title')}}</h2>
         <div class="testimonials-grid">
           <div class="testimonial-card rb-card" *ngFor="let t of testimonials; trackBy: trackByIndex">
             <div class="t-stars">
@@ -199,8 +199,8 @@ import { I18nService } from '../../services/i18n.service';
       <div class="container">
         <div class="app-inner flex-between">
           <div class="app-text">
-            <h2>Download the redBus App</h2>
-            <p>Book bus tickets on the go. Available on Android & iOS</p>
+            <h2>{{i18n.t('home.appPromo.title')}}</h2>
+            <p>{{i18n.t('home.appPromo.sub')}}</p>
             <ul class="app-features">
               <li><i class="fa fa-check-circle"></i> Instant booking confirmation</li>
               <li><i class="fa fa-check-circle"></i> Real-time bus tracking</li>
@@ -225,7 +225,7 @@ import { I18nService } from '../../services/i18n.service';
                     <div style="font-size:11px; color:var(--text-muted);">{{i18n.t('search.to')}}</div>
                     <div style="font-weight:600;">Chennai</div>
                   </div>
-                  <div style="background:#d84e55; color:white; border-radius:6px; padding:10px; text-align:center; font-weight:600;">SEARCH BUSES</div>
+                  <div style="background:#d84e55; color:white; border-radius:6px; padding:10px; text-align:center; font-weight:600;">{{i18n.t('search.btn')}}</div>
                 </div>
               </div>
             </div>

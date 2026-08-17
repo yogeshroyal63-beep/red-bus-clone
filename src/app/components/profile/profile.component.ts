@@ -4,13 +4,15 @@ import { RouterModule } from '@angular/router';
 import { CommunityService } from '../../services/community.service';
 import { ReviewService } from '../../services/review.service';
 import { I18nService } from '../../services/i18n.service';
+import { AuthService } from '../../services/auth.service';
 
 /**
  * Minimal "My Activity" profile view.
  * Satisfies: "User activity, including posts and interactions, should be visible on profiles."
- * This demo app has no server-backed auth/session, so — consistent with how the rest of the
- * app identifies the current user (community.component.ts, reviews.component.ts) — activity is
- * scoped to the local 'current_user' / 'You' identity used across the client.
+ * Activity is scoped to the real authenticated account id (auth.service.ts's AuthUser._id),
+ * matching the ids the server assigns to reviews/posts/comments. This used to be hardcoded
+ * to the literal 'current_user' / 'current_user_id' placeholder, which never matched a real
+ * account's id once login existed — My Posts/Comments/Reviews always showed empty.
  */
 @Component({
   selector: 'app-profile',
@@ -89,7 +91,9 @@ import { I18nService } from '../../services/i18n.service';
 })
 export class ProfileComponent {
   i18n = inject(I18nService);
-  currentUser = 'current_user';
+  auth = inject(AuthService);
+
+  get currentUser(): string { return this.auth.user()?._id || ''; }
 
   constructor(public cs: CommunityService, public rs: ReviewService) {}
 
@@ -108,7 +112,7 @@ export class ProfileComponent {
   }
 
   get myReviews() {
-    return this.rs.reviews().filter(r => r.userId === 'current_user_id');
+    return this.rs.reviews().filter(r => r.userId === this.currentUser);
   }
 
   timeAgo(date: Date) {

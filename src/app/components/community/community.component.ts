@@ -5,6 +5,7 @@ import { RouterModule, ActivatedRoute } from '@angular/router';
 import { CommunityService, Post } from '../../services/community.service';
 import { ToastService } from '../../services/toast.service';
 import { I18nService } from '../../services/i18n.service';
+import { AuthService } from '../../services/auth.service';
 
 @Component({
   selector: 'app-community',
@@ -373,7 +374,12 @@ export class CommunityComponent implements OnInit {
   showCreate = false;
   isVerified = false;
   verifiedPnr = ''; // the actual PNR that proves verification — sent to the server, not just a boolean
-  currentUser = 'current_user';
+
+  // Was hardcoded to the literal 'current_user' — never matched the real authenticated
+  // account id the server assigns (auth.service.ts's AuthUser._id), so like/comment-like
+  // highlighting and "is this mine" checks never matched a real user's own activity.
+  get currentUser(): string { return this.auth.user()?._id || ''; }
+
   expandedPosts: string[] = [];
   openComments: string[] = [];
   commentInputs: Record<string, string> = {};
@@ -399,7 +405,7 @@ export class CommunityComponent implements OnInit {
     { name:'Vikram Singh', avatar:'V', posts:18, likes:89, trusted:false },
   ];
 
-  constructor(public cs: CommunityService, private toast: ToastService, private route: ActivatedRoute, public i18n: I18nService) {}
+  constructor(public cs: CommunityService, private toast: ToastService, private route: ActivatedRoute, public i18n: I18nService, private auth: AuthService) {}
   highlightedPostId = '';
   ngOnInit() {
     // Verified = has at least one confirmed booking in localStorage

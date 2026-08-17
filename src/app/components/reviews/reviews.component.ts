@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ReviewService, Review } from '../../services/review.service';
 import { I18nService } from '../../services/i18n.service';
+import { AuthService } from '../../services/auth.service';
 
 @Component({
   selector: 'app-reviews',
@@ -147,7 +148,7 @@ import { I18nService } from '../../services/i18n.service';
           <div class="rc-footer flex-between">
             <div class="helpful-row flex-center gap-8">
               <span class="fs-12 text-grey">{{i18n.t('reviews.helpfulQ')}}</span>
-              <button class="helpful-btn" [class.voted]="review.helpful.includes('current_user')" (click)="rs.markHelpful(review.id, 'current_user')">
+              <button class="helpful-btn" [class.voted]="currentUser && review.helpful.includes(currentUser)" [disabled]="!currentUser" (click)="rs.markHelpful(review.id, currentUser)">
                 <i class="fa fa-thumbs-up"></i> {{review.upvotes}}
               </button>
             </div>
@@ -249,10 +250,15 @@ export class ReviewsComponent implements OnInit {
   editRating = 0;
   isVerified = false;
   bookingPnr = '';
-  currentUser = 'current_user_id';
   canWrite = true;
 
-  constructor(public rs: ReviewService, public i18n: I18nService) {}
+  // Was hardcoded to the literal 'current_user_id' — never matched the real
+  // authenticated account id the server assigns (auth.service.ts's AuthUser._id),
+  // so "is this mine" checks (edit button, helpful-vote highlight, My Reviews
+  // filter in profile.component.ts) never matched a real user's own content.
+  get currentUser(): string { return this.auth.user()?._id || ''; }
+
+  constructor(public rs: ReviewService, public i18n: I18nService, private auth: AuthService) {}
 
   ngOnInit() {
     // Derive verified status from a real completed booking in localStorage

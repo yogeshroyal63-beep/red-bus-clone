@@ -86,7 +86,7 @@ import { AuthService } from '../../services/auth.service';
             <a routerLink="/my-bookings" class="strip-link nav-link" style="font-size:13px; border:none; padding:8px 12px;">
               <i class="fa fa-ticket-alt"></i> {{i18n.t('nav.bookings')}}
             </a>
-            <a routerLink="/profile" class="strip-link nav-link" style="font-size:13px; border:none; padding:8px 12px;" title="My Activity">
+            <a routerLink="/profile" class="strip-link nav-link" style="font-size:13px; border:none; padding:8px 12px;" [attr.title]="i18n.t('community.myActivityLink')">
               <i class="fa fa-user-circle"></i> My Activity
             </a>
             <button class="rb-btn-outline" style="padding:8px 16px; font-size:13px;" *ngIf="!auth.isLoggedIn()" routerLink="/login">
