@@ -6,6 +6,11 @@ const { authLimiter, validateRegister, validateLogin, handleValidationErrors } =
 
 const userStore = []; // In-memory fallback
 
+// A real bcrypt hash of an arbitrary, never-used string — see the timing-attack note in
+// the /login handler below. Computed once at module load (not per-request) so it's a
+// fixed, valid hash rather than a hand-typed string that risks being malformed.
+const DUMMY_HASH_FOR_TIMING = bcrypt.hashSync('rb-timing-normalization-not-a-real-password', 12);
+
 // POST /api/auth/register
 router.post('/register', authLimiter, validateRegister, handleValidationErrors, async (req, res) => {
   try {
@@ -62,10 +67,24 @@ router.post('/login', authLimiter, validateLogin, handleValidationErrors, async 
     } else {
       user = userStore.find(u => u.email === email);
     }
-    if (!user) return res.status(404).json({ error: 'No account found with this email', code: 'auth.err.noAccount' });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ error: 'Incorrect password', code: 'auth.err.wrongPassword' });
+    // Finding #36: unknown email and wrong password used to return different status
+    // codes and messages (404 "No account found" vs. 401 "Incorrect password"), which
+    // lets an attacker enumerate registered emails just by watching the response. Both
+    // cases now return the identical 401 + generic message/code.
+    //
+    // Skipping bcrypt.compare entirely on the "no such user" path would still leak the
+    // same thing through timing — a missing account replies in microseconds, a wrong
+    // password takes as long as bcrypt does (~100ms+). DUMMY_HASH_FOR_TIMING is a bcrypt
+    // hash of an unguessable, unused string; comparing against it costs the same as a
+    // real check, so both paths take a similar amount of time either way.
+    const isMatch = user
+      ? await bcrypt.compare(password, user.password)
+      : await bcrypt.compare(password, DUMMY_HASH_FOR_TIMING);
+
+    if (!user || !isMatch) {
+      return res.status(401).json({ error: 'Incorrect email or password', code: 'auth.err.invalidCredentials' });
+    }
 
     const { password: _, ...safeUser } = user;
     const token = generateToken(user._id.toString(), user.name);

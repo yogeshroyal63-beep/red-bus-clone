@@ -8,6 +8,13 @@ import { NotificationService } from './notification.service';
 import { AuthService } from './auth.service';
 import { I18nService } from './i18n.service';
 
+/** Trimmed booking shape returned by the public, unauthenticated tracking endpoint —
+ *  deliberately excludes passengerDetails/contactEmail/contactPhone/totalAmount/seats,
+ *  which stay behind the owner-only getByPnr()/getMyBookings(). */
+export type BookingTrackingInfo = Pick<Booking,
+  'pnr' | 'busName' | 'from' | 'to' | 'date' | 'departureTime' | 'arrivalTime' |
+  'boardingPoint' | 'droppingPoint' | 'status'>;
+
 @Injectable({ providedIn: 'root' })
 export class BookingService {
   private readonly api = `${environment.apiUrl}/bookings`;
@@ -127,9 +134,19 @@ export class BookingService {
     );
   }
 
-  /** Get booking by PNR */
+  /** Get booking by PNR (requires login + ownership — full record) */
   getByPnr(pnr: string): Observable<Booking> {
     return this.http.get<{ success: boolean; data: Booking }>(`${this.api}/pnr/${pnr}`).pipe(
+      map(res => res.data),
+      catchError((err: HttpErrorResponse) => throwError(() => new Error(this.i18n.tErr(err, 'err.pnrNotFound'))))
+    );
+  }
+
+  /** Get booking by PNR for the tracking page — no login required, matching how PNR-based
+   *  tracking works elsewhere (the PNR is the credential). Returns only the fields a
+   *  tracking view needs, never passenger/contact/payment details (see server route). */
+  trackByPnr(pnr: string): Observable<BookingTrackingInfo> {
+    return this.http.get<{ success: boolean; data: BookingTrackingInfo }>(`${this.api}/pnr/${pnr}/track`).pipe(
       map(res => res.data),
       catchError((err: HttpErrorResponse) => throwError(() => new Error(this.i18n.tErr(err, 'err.pnrNotFound'))))
     );

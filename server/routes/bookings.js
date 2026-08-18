@@ -1,10 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const { bookingLimiter, validateBooking, handleValidationErrors } = require('../middleware/security');
+const rateLimit = require('express-rate-limit');
 const { optionalAuth, verifyToken } = require('../middleware/auth.middleware');
 const { verifyAndConsumeLocks } = require('./seats');
 
 const bookingStore = [];
+
+// Own limiter for the public tracking lookup — it's unauthenticated by design (see
+// /pnr/:pnr/track below), so it needs its own budget independent of the global one to
+// keep PNR brute-forcing/scraping cheap to rate-limit even though the PNR space itself
+// (10 hex chars, ~1.1e12 combinations) makes guessing impractical on its own.
+const trackLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many tracking lookups. Please slow down.' }
+});
 
 // Server-side fare recalculation (Finding B). The client used to send totalAmount as a
 // plain positive number with no cross-check against the bus's actual price — a user
@@ -98,12 +111,43 @@ router.post('/', bookingLimiter, optionalAuth, validateBooking, handleValidation
   }
 });
 
+// GET /api/bookings/pnr/:pnr/track — public, PNR-only lookup for the bus-tracking page.
+// Finding #35: tightening the endpoint above to owner-only (correctly, for #23) broke
+// tracking for the app's default flow — bookings don't require login (POST /api/bookings
+// is optionalAuth), so a guest booking's userId is always null and can never pass an
+// ownership check, not even for the person who made it. Real PNR-based tracking (airlines,
+// other bus operators) treats the PNR itself as the credential and doesn't require login.
+// This endpoint restores that: no auth required, but it returns only what a tracking page
+// needs — never passengerDetails, contactEmail, contactPhone, totalAmount, or seats, which
+// is exactly the PII exposure #23 was about in the first place. The owner-only endpoint
+// above stays locked down for anything that needs the full record.
+router.get('/pnr/:pnr/track', trackLimiter, async (req, res) => {
+  try {
+    const pnr = req.params.pnr.toUpperCase();
+    if (!/^RB[A-F0-9]{10}$/i.test(pnr)) return res.status(400).json({ error: 'Invalid PNR format', code: 'err.pnrInvalid' });
+
+    let booking;
+    try {
+      const Booking = require('../models/Booking');
+      booking = await Booking.findOne({ pnr });
+    } catch {
+      booking = bookingStore.find(b => b.pnr === pnr);
+    }
+    if (!booking) return res.status(404).json({ error: 'Booking not found. Check your PNR.', code: 'err.pnrNotFound' });
+
+    const b = typeof booking.toObject === 'function' ? booking.toObject() : booking;
+    const { busName, from, to, date, departureTime, arrivalTime, boardingPoint, droppingPoint, status } = b;
+    res.json({ success: true, data: { pnr, busName, from, to, date, departureTime, arrivalTime, boardingPoint, droppingPoint, status } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/bookings/pnr/:pnr
 // Finding #23 / 22: this used to be a public IDOR — optionalAuth with zero ownership
 // check, returning the full booking doc (passenger details, contact email/phone, amount)
-// to anyone who had the PNR string. It's also unused by the current frontend (checked:
-// no component calls it), so tightening it to owner-only carries no functional cost.
-// Only the authenticated owner of the booking can fetch it by PNR now.
+// to anyone who had the PNR string. Only the authenticated owner of the booking can fetch
+// the full record by PNR — use /pnr/:pnr/track above for the unauthenticated tracking case.
 router.get('/pnr/:pnr', verifyToken, async (req, res) => {
   try {
     const pnr = req.params.pnr.toUpperCase();

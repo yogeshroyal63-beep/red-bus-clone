@@ -3,8 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { I18nService } from '../../services/i18n.service';
 import { ToastService } from '../../services/toast.service';
-import { BookingService } from '../../services/booking.service';
-import { Booking } from '../../models/bus.model';
+import { BookingService, BookingTrackingInfo } from '../../services/booking.service';
 
 @Component({
   selector: 'app-bus-tracking',
@@ -230,7 +229,7 @@ export class BusTrackingComponent {
   loading = false;
   tracked = false;
   notFound = false;
-  booking: Booking | null = null;
+  booking: BookingTrackingInfo | null = null;
   busX = 15; busY = 75;
 
   /** 'upcoming' | 'in_transit' | 'completed' | 'cancelled', derived from the real
@@ -253,12 +252,13 @@ export class BusTrackingComponent {
     this.tracked = false;
     this.notFound = false;
 
-    // Findings #31: this used to skip lookup entirely and animate a hardcoded fake
-    // bus (fixed Bangalore→Chennai path via "Krishnagiri", driver "Suresh Kumar",
-    // etc.) for ANY non-empty input. It now resolves the real booking via the same
-    // PNR endpoint the booking-confirmation page uses, and only shows tracking data
-    // once a real booking is found.
-    this.bookingService.getByPnr(pnr).subscribe({
+    // Findings #31 / #35: this used to skip lookup entirely (fixed, fake data) or —
+    // after the correct-but-conflicting IDOR fix on getByPnr() — require login and
+    // ownership for a PNR that guest bookings can never satisfy. trackByPnr() hits the
+    // dedicated public tracking endpoint instead: no auth required (the PNR is the
+    // credential, same as real bus/airline tracking), and it returns only tracking-
+    // relevant fields, never the passenger/contact/payment details getByPnr() exposes.
+    this.bookingService.trackByPnr(pnr).subscribe({
       next: (booking) => {
         this.loading = false;
         this.booking = booking;
@@ -276,7 +276,7 @@ export class BusTrackingComponent {
     });
   }
 
-  private computeStage(booking: Booking) {
+  private computeStage(booking: BookingTrackingInfo) {
     if (booking.status === 'cancelled') { this.stage = 'cancelled'; this.progress = 0; return; }
 
     const departure = this.parseDateTime(booking.date, booking.departureTime);
