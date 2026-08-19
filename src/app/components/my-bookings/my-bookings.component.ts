@@ -230,14 +230,14 @@ export class MyBookingsComponent implements OnInit {
   }
 
   cancelBooking(b: Booking) {
-    if (confirm(`Cancel booking PNR ${b.pnr}? Refund will be processed in 5-7 days.`)) {
+    if (confirm(this.i18n.t('bookings.confirmCancel', { pnr: b.pnr }))) {
       this.bookingService.cancelBooking(b.id!).subscribe(() => {
         b.status = 'cancelled';
       });
     }
   }
 
-  downloadTicket(b: Booking) { alert(`Downloading ticket for PNR: ${b.pnr}`); }
+  downloadTicket(b: Booking) { alert(this.i18n.t('bookings.downloadingTicket', { pnr: b.pnr })); }
   goHome() { this.router.navigate(['/']); }
   trackBookingId(index: number, b: any): string { return b.id || b.pnr || index.toString(); }
 }

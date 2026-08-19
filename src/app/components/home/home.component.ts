@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { BusService } from '../../services/bus.service';
 import { I18nService } from '../../services/i18n.service';
+import { ToastService } from '../../services/toast.service';
 
 @Component({
   selector: 'app-home',
@@ -412,7 +413,7 @@ export class HomeComponent implements OnInit {
     { name: 'Rahul Verma', rating: 5, text: 'Best bus booking app in India. Easy to use, great offers, and excellent customer support. Highly recommended!', route: 'Delhi → Agra' }
   ];
 
-  constructor(private busService: BusService, private router: Router, public i18n: I18nService) {}
+  constructor(private busService: BusService, private router: Router, public i18n: I18nService, private toast: ToastService) {}
 
   ngOnInit() {
     this.date = this.today;
@@ -431,7 +432,12 @@ export class HomeComponent implements OnInit {
   swapCities() { [this.from, this.to] = [this.to, this.from]; }
 
   searchBuses() {
-    if (!this.from || !this.to || !this.date) { alert('Please fill in all fields'); return; }
+    // Finding: this used a raw browser alert() with hardcoded English text — the one
+    // spot in the app that bypassed both i18n and the app's own ToastService, which
+    // every other validation/error message goes through (see bus-tracking.component,
+    // booking.service, etc.). Same pattern as those: translated via i18n.t(), shown
+    // via toast so it matches the app's actual error UI instead of a native dialog.
+    if (!this.from || !this.to || !this.date) { this.toast.error(this.i18n.t('val.fillAllFields')); return; }
     const rec = { from: this.from, to: this.to, date: this.date };
     const recents = JSON.parse(localStorage.getItem('rb_recent') || '[]');
     recents.unshift(rec);
@@ -447,7 +453,7 @@ export class HomeComponent implements OnInit {
   applyRecent(s: any) { this.from = s.from; this.to = s.to; this.date = s.date; }
   copyCode(code: string) {
     navigator.clipboard.writeText(code).catch(() => {});
-    alert(`Code ${code} copied!`);
+    alert(this.i18n.t('home.codeCopied', { code }));
   }
   getStars(n: number) { return Array(n).fill(0); }
   trackByIndex(index: number): number { return index; }
