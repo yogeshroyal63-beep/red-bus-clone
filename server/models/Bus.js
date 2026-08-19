@@ -35,7 +35,12 @@ const busSchema = new mongoose.Schema({
   seats: [seatSchema],
   offers: [String],
   cancellationPolicy: { type: String, default: 'Free cancellation before 24 hrs' },
-  active: { type: Boolean, default: true }
+  active: { type: Boolean, default: true },
+  // Set only by server/seed.js, to 'mockBuses' — lets that script find and safely
+  // replace just the documents it previously inserted on a re-run, without touching
+  // any bus added another way (admin panel, a real booking flow, etc.). Not set on
+  // buses created through any other path, so it's undefined/absent for those.
+  seedSource: String
 }, { timestamps: true });
 
 busSchema.index({ from: 1, to: 1 });

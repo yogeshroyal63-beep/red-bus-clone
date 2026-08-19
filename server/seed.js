@@ -1,9 +1,9 @@
 // One-time seed script — inserts the app's existing curated bus data (real operator
 // names, timings, fares — see the comment on mockBuses in routes/buses.js) into the
 // actual MongoDB `buses` collection, so a live search against the real database
-// returns real results instead of an empty array. Safe to re-run: it clears only the
-// buses it previously seeded (by _id) rather than wiping the whole collection, so any
-// buses added by other means (e.g. an admin panel, real bookings) aren't touched.
+// returns real results instead of an empty array. Safe to re-run: it only clears
+// documents it previously inserted (tagged seedSource: 'mockBuses'), never touching
+// buses added another way (e.g. an admin panel, a real booking flow).
 //
 // Usage:
 //   cd server
@@ -40,17 +40,19 @@ async function seed() {
   await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
   console.log(`✅ Connected: ${MONGODB_URI.replace(/\/\/[^@]+@/, '//<credentials>@')}`);
 
-  // generateSeats() in routes/buses.js is a normal JS function, not middleware/route
-  // logic — it's fine to reuse here so seeded buses get the same deterministic seat
-  // map shape the rest of the app (seat-selection, booking flow) already expects.
-  const seatIds = mockBuses.map(b => b._id);
-
-  const removed = await Bus.deleteMany({ _id: { $in: seatIds } });
+  // mockBuses' _id fields ('1', '2', …) exist only to keep the frontend's own
+  // in-memory demo data and this file's fallback array pointing at the "same" bus by
+  // a shared, human-readable id — they were never meant to be real Mongo primary
+  // keys, and MongoDB's default _id type is ObjectId, so inserting the literal string
+  // '1' fails with a cast error. Stripping _id here lets MongoDB assign its own real
+  // ObjectId on insert, which is what every other write path in this app (bookings,
+  // reviews, etc.) already expects a Bus._id to be.
+  const removed = await Bus.deleteMany({ seedSource: 'mockBuses' });
   if (removed.deletedCount) {
     console.log(`Cleared ${removed.deletedCount} previously-seeded bus(es) before re-inserting.`);
   }
 
-  const docs = mockBuses.map(b => ({ ...b, active: true }));
+  const docs = mockBuses.map(({ _id, ...rest }) => ({ ...rest, active: true, seedSource: 'mockBuses' }));
   const inserted = await Bus.insertMany(docs, { ordered: false });
 
   console.log(`✅ Seeded ${inserted.length} buses:`);
