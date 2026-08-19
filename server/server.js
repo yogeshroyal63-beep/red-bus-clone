@@ -78,7 +78,11 @@ if (NODE_ENV === 'development') {
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/redbus';
 let isDbConnected = false;
 
-mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+mongoose.connect(MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 5000,
+  socketTimeoutMS: 8000
+})
   .then(() => {
     isDbConnected = true;
     console.log(`✅ MongoDB connected: ${MONGODB_URI.replace(/\/\/[^@]+@/, '//<credentials>@')}`);
