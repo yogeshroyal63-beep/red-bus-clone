@@ -110,7 +110,8 @@ import { Bus } from '../../models/bus.model';
       <div class="results-main">
         <!-- Sort & Count -->
         <div class="results-toolbar flex-between">
-          <span class="results-count">{{i18n.t('results.busesFound', {count: filteredBuses.length, from, to})}}</span>
+          <span class="results-count" *ngIf="!loading">{{i18n.t('results.busesFound', {count: filteredBuses.length, from, to})}}</span>
+          <span class="results-count" *ngIf="loading">{{i18n.t('results.searching', {from, to})}}</span>
           <div class="sort-options flex-center gap-8">
             <span class="fs-13 text-grey">{{i18n.t('results.sortBy')}}</span>
             <button class="sort-btn" role="button" [class.active]="sortBy==='departure'" (click)="setSortBy('departure')">{{i18n.t('results.sortDeparture')}}</button>
@@ -390,11 +391,29 @@ export class SearchResultsComponent implements OnInit {
     }
   }
 
+  // Findings: applyFilters() only ever checked maxPrice/ratings/amenities. The Departure
+  // Time chips and Bus Type checkboxes both correctly pushed into filters.times/types via
+  // toggleTime()/toggleType() and triggered applyFilters() on click — but nothing in
+  // applyFilters() ever read those two arrays, so selecting them changed the UI's active/
+  // checked state with zero effect on the actual results. Both are wired in now.
+  private inTimeWindow(departureTime: string, window: string): boolean {
+    const hour = parseInt(departureTime.split(':')[0], 10);
+    switch (window) {
+      case 'before6': return hour < 6;
+      case '6to12': return hour >= 6 && hour < 12;
+      case '12to6': return hour >= 12 && hour < 18;
+      case 'after6': return hour >= 18;
+      default: return true;
+    }
+  }
+
   applyFilters() {
     let res = [...this.buses];
     if (this.filters.maxPrice < 3000) res = res.filter(b => b.price <= this.filters.maxPrice);
     if (this.filters.ratings.length) res = res.filter(b => this.filters.ratings.some(r => b.rating >= r));
     if (this.filters.amenities.length) res = res.filter(b => this.filters.amenities.every(a => b.amenities.includes(a)));
+    if (this.filters.times.length) res = res.filter(b => this.filters.times.some(t => this.inTimeWindow(b.departureTime, t)));
+    if (this.filters.types.length) res = res.filter(b => this.filters.types.includes(b.type));
     this.sortBuses(res);
   }
 

@@ -1,0 +1,102 @@
+diff --git a/src/app/components/search-results/search-results.component.ts b/src/app/components/search-results/search-results.component.ts
+index 09eb6d8..7374318 100644
+--- a/src/app/components/search-results/search-results.component.ts
++++ b/src/app/components/search-results/search-results.component.ts
+@@ -110,7 +110,8 @@ import { Bus } from '../../models/bus.model';
+       <div class="results-main">
+         <!-- Sort & Count -->
+         <div class="results-toolbar flex-between">
+-          <span class="results-count">{{i18n.t('results.busesFound', {count: filteredBuses.length, from, to})}}</span>
++          <span class="results-count" *ngIf="!loading">{{i18n.t('results.busesFound', {count: filteredBuses.length, from, to})}}</span>
++          <span class="results-count" *ngIf="loading">{{i18n.t('results.searching', {from, to})}}</span>
+           <div class="sort-options flex-center gap-8">
+             <span class="fs-13 text-grey">{{i18n.t('results.sortBy')}}</span>
+             <button class="sort-btn" role="button" [class.active]="sortBy==='departure'" (click)="setSortBy('departure')">{{i18n.t('results.sortDeparture')}}</button>
+@@ -390,11 +391,29 @@ export class SearchResultsComponent implements OnInit {
+     }
+   }
+ 
++  // Findings: applyFilters() only ever checked maxPrice/ratings/amenities. The Departure
++  // Time chips and Bus Type checkboxes both correctly pushed into filters.times/types via
++  // toggleTime()/toggleType() and triggered applyFilters() on click — but nothing in
++  // applyFilters() ever read those two arrays, so selecting them changed the UI's active/
++  // checked state with zero effect on the actual results. Both are wired in now.
++  private inTimeWindow(departureTime: string, window: string): boolean {
++    const hour = parseInt(departureTime.split(':')[0], 10);
++    switch (window) {
++      case 'before6': return hour < 6;
++      case '6to12': return hour >= 6 && hour < 12;
++      case '12to6': return hour >= 12 && hour < 18;
++      case 'after6': return hour >= 18;
++      default: return true;
++    }
++  }
++
+   applyFilters() {
+     let res = [...this.buses];
+     if (this.filters.maxPrice < 3000) res = res.filter(b => b.price <= this.filters.maxPrice);
+     if (this.filters.ratings.length) res = res.filter(b => this.filters.ratings.some(r => b.rating >= r));
+     if (this.filters.amenities.length) res = res.filter(b => this.filters.amenities.every(a => b.amenities.includes(a)));
++    if (this.filters.times.length) res = res.filter(b => this.filters.times.some(t => this.inTimeWindow(b.departureTime, t)));
++    if (this.filters.types.length) res = res.filter(b => this.filters.types.includes(b.type));
+     this.sortBuses(res);
+   }
+ 
+diff --git a/src/app/services/i18n.service.ts b/src/app/services/i18n.service.ts
+index f492953..dad6c29 100644
+--- a/src/app/services/i18n.service.ts
++++ b/src/app/services/i18n.service.ts
+@@ -173,7 +173,7 @@ const EN = {
+   'results.busType': 'Bus Type', 'results.amenities': 'Amenities',
+   'amenity.wifi': 'WiFi', 'amenity.ac': 'A/C', 'amenity.charging': 'Charging', 'amenity.blanket': 'Blanket', 'amenity.water': 'Water',
+   'results.priceRange': 'Price Range', 'results.operatorRating': 'Operator Rating', 'results.starsPlus': '{n}+ stars',
+-  'results.busesFound': '{count} buses found for {from} → {to}', 'results.sortBy': 'Sort by:',
++  'results.busesFound': '{count} buses found for {from} → {to}', 'results.searching': 'Searching buses for {from} → {to}...', 'results.sortBy': 'Sort by:',
+   'results.sortDeparture': 'Departure', 'results.sortPrice': 'Price', 'results.sortDuration': 'Duration', 'results.sortRating': 'Rating', 'results.sortSeats': 'Seats',
+   'results.noBusesFound': 'No buses found', 'results.tryDifferent': 'Try different dates or routes', 'results.searchAgain': 'Search Again',
+   'results.plusOneDay': '+1 Day', 'results.ratingsCount': '({n} ratings)', 'results.hurryLeft': 'Hurry! Only {n} left', 'results.seatsAvailable': '{n} seats available',
+@@ -372,7 +372,7 @@ const HI: Record<string, string> = {
+   'results.busType': 'बस प्रकार', 'results.amenities': 'सुविधाएं',
+   'amenity.wifi': 'वाईफ़ाई', 'amenity.ac': 'ए/सी', 'amenity.charging': 'चार्जिंग', 'amenity.blanket': 'कंबल', 'amenity.water': 'पानी',
+   'results.priceRange': 'मूल्य सीमा', 'results.operatorRating': 'ऑपरेटर रेटिंग', 'results.starsPlus': '{n}+ सितारे',
+-  'results.busesFound': '{from} → {to} के लिए {count} बसें मिलीं', 'results.sortBy': 'क्रमबद्ध करें:',
++  'results.busesFound': '{from} → {to} के लिए {count} बसें मिलीं', 'results.searching': '{from} → {to} के लिए बसें खोजी जा रही हैं...', 'results.sortBy': 'क्रमबद्ध करें:',
+   'results.sortDeparture': 'प्रस्थान', 'results.sortPrice': 'मूल्य', 'results.sortDuration': 'अवधि', 'results.sortRating': 'रेटिंग', 'results.sortSeats': 'सीटें',
+   'results.noBusesFound': 'कोई बस नहीं मिली', 'results.tryDifferent': 'अलग तारीख़ या मार्ग आज़माएं', 'results.searchAgain': 'फिर से खोजें',
+   'results.plusOneDay': '+1 दिन', 'results.ratingsCount': '({n} रेटिंग)', 'results.hurryLeft': 'जल्दी करें! केवल {n} बची हैं', 'results.seatsAvailable': '{n} सीटें उपलब्ध',
+@@ -570,7 +570,7 @@ const TA: Record<string, string> = {
+   'results.busType': 'பேருந்து வகை', 'results.amenities': 'வசதிகள்',
+   'amenity.wifi': 'வைஃபை', 'amenity.ac': 'ஏசி', 'amenity.charging': 'சார்ஜிங்', 'amenity.blanket': 'போர்வை', 'amenity.water': 'தண்ணீர்',
+   'results.priceRange': 'விலை வரம்பு', 'results.operatorRating': 'ஆபரேட்டர் மதிப்பீடு', 'results.starsPlus': '{n}+ நட்சத்திரங்கள்',
+-  'results.busesFound': '{from} → {to} க்கு {count} பேருந்துகள் கிடைத்தன', 'results.sortBy': 'வரிசைப்படுத்து:',
++  'results.busesFound': '{from} → {to} க்கு {count} பேருந்துகள் கிடைத்தன', 'results.searching': '{from} → {to} க்கு பேருந்துகள் தேடப்படுகின்றன...', 'results.sortBy': 'வரிசைப்படுத்து:',
+   'results.sortDeparture': 'புறப்பாடு', 'results.sortPrice': 'விலை', 'results.sortDuration': 'கால அளவு', 'results.sortRating': 'மதிப்பீடு', 'results.sortSeats': 'இருக்கைகள்',
+   'results.noBusesFound': 'பேருந்துகள் இல்லை', 'results.tryDifferent': 'வேறு தேதி அல்லது வழியை முயற்சிக்கவும்', 'results.searchAgain': 'மீண்டும் தேடு',
+   'results.plusOneDay': '+1 நாள்', 'results.ratingsCount': '({n} மதிப்பீடுகள்)', 'results.hurryLeft': 'விரைவாக! {n} மட்டுமே மீதம்', 'results.seatsAvailable': '{n} இருக்கைகள் உள்ளன',
+@@ -768,7 +768,7 @@ const TE: Record<string, string> = {
+   'results.busType': 'బస్సు రకం', 'results.amenities': 'సౌకర్యాలు',
+   'amenity.wifi': 'వైఫై', 'amenity.ac': 'ఏసీ', 'amenity.charging': 'ఛార్జింగ్', 'amenity.blanket': 'దుప్పటి', 'amenity.water': 'నీరు',
+   'results.priceRange': 'ధర పరిధి', 'results.operatorRating': 'ఆపరేటర్ రేటింగ్', 'results.starsPlus': '{n}+ నక్షత్రాలు',
+-  'results.busesFound': '{from} → {to} కోసం {count} బస్సులు దొరికాయి', 'results.sortBy': 'క్రమబద్ధీకరించండి:',
++  'results.busesFound': '{from} → {to} కోసం {count} బస్సులు దొరికాయి', 'results.searching': '{from} → {to} కోసం బస్సులు వెతుకుతున్నాము...', 'results.sortBy': 'క్రమబద్ధీకరించండి:',
+   'results.sortDeparture': 'బయలుదేరడం', 'results.sortPrice': 'ధర', 'results.sortDuration': 'వ్యవధి', 'results.sortRating': 'రేటింగ్', 'results.sortSeats': 'సీట్లు',
+   'results.noBusesFound': 'బస్సులు కనుగొనబడలేదు', 'results.tryDifferent': 'వేరే తేదీలు లేదా మార్గాలు ప్రయత్నించండి', 'results.searchAgain': 'మళ్లీ వెతకండి',
+   'results.plusOneDay': '+1 రోజు', 'results.ratingsCount': '({n} రేటింగ్‌లు)', 'results.hurryLeft': 'తొందరపడండి! {n} మాత్రమే మిగిలి ఉన్నాయి', 'results.seatsAvailable': '{n} సీట్లు అందుబాటులో ఉన్నాయి',
+@@ -966,7 +966,7 @@ const KN: Record<string, string> = {
+   'results.busType': 'ಬಸ್ ಪ್ರಕಾರ', 'results.amenities': 'ಸೌಲಭ್ಯಗಳು',
+   'amenity.wifi': 'ವೈಫೈ', 'amenity.ac': 'ಎಸಿ', 'amenity.charging': 'ಚಾರ್ಜಿಂಗ್', 'amenity.blanket': 'ಕಂಬಳಿ', 'amenity.water': 'ನೀರು',
+   'results.priceRange': 'ಬೆಲೆ ಶ್ರೇಣಿ', 'results.operatorRating': 'ಆಪರೇಟರ್ ರೇಟಿಂಗ್', 'results.starsPlus': '{n}+ ನಕ್ಷತ್ರಗಳು',
+-  'results.busesFound': '{from} → {to} ಗೆ {count} ಬಸ್‌ಗಳು ಸಿಕ್ಕಿವೆ', 'results.sortBy': 'ವಿಂಗಡಿಸಿ:',
++  'results.busesFound': '{from} → {to} ಗೆ {count} ಬಸ್‌ಗಳು ಸಿಕ್ಕಿವೆ', 'results.searching': '{from} → {to} ಗೆ ಬಸ್‌ಗಳನ್ನು ಹುಡುಕಲಾಗುತ್ತಿದೆ...', 'results.sortBy': 'ವಿಂಗಡಿಸಿ:',
+   'results.sortDeparture': 'ನಿರ್ಗಮನ', 'results.sortPrice': 'ಬೆಲೆ', 'results.sortDuration': 'ಅವಧಿ', 'results.sortRating': 'ರೇಟಿಂಗ್', 'results.sortSeats': 'ಆಸನಗಳು',
+   'results.noBusesFound': 'ಬಸ್‌ಗಳು ಕಂಡುಬಂದಿಲ್ಲ', 'results.tryDifferent': 'ಬೇರೆ ದಿನಾಂಕ ಅಥವಾ ಮಾರ್ಗ ಪ್ರಯತ್ನಿಸಿ', 'results.searchAgain': 'ಮತ್ತೆ ಹುಡುಕಿ',
+   'results.plusOneDay': '+1 ದಿನ', 'results.ratingsCount': '({n} ರೇಟಿಂಗ್‌ಗಳು)', 'results.hurryLeft': 'ಬೇಗ ಮಾಡಿ! {n} ಮಾತ್ರ ಉಳಿದಿವೆ', 'results.seatsAvailable': '{n} ಆಸನಗಳು ಲಭ್ಯ',
+@@ -1164,7 +1164,7 @@ const ML: Record<string, string> = {
+   'results.busType': 'ബസ് തരം', 'results.amenities': 'സൗകര്യങ്ങൾ',
+   'amenity.wifi': 'വൈഫൈ', 'amenity.ac': 'എസി', 'amenity.charging': 'ചാർജിംഗ്', 'amenity.blanket': 'പുതപ്പ്', 'amenity.water': 'വെള്ളം',
+   'results.priceRange': 'വില പരിധി', 'results.operatorRating': 'ഓപ്പറേറ്റർ റേറ്റിംഗ്', 'results.starsPlus': '{n}+ നക്ഷത്രങ്ങൾ',
+-  'results.busesFound': '{from} → {to} എന്നിവയ്ക്കായി {count} ബസുകൾ കണ്ടെത്തി', 'results.sortBy': 'ക്രമീകരിക്കുക:',
++  'results.busesFound': '{from} → {to} എന്നിവയ്ക്കായി {count} ബസുകൾ കണ്ടെത്തി', 'results.searching': '{from} → {to} എന്നിവയ്ക്കായി ബസുകൾ തിരയുന്നു...', 'results.sortBy': 'ക്രമീകരിക്കുക:',
+   'results.sortDeparture': 'പുറപ്പാട്', 'results.sortPrice': 'വില', 'results.sortDuration': 'ദൈർഘ്യം', 'results.sortRating': 'റേറ്റിംഗ്', 'results.sortSeats': 'സീറ്റുകൾ',
+   'results.noBusesFound': 'ബസുകൾ കണ്ടെത്തിയില്ല', 'results.tryDifferent': 'വ്യത്യസ്ത തീയതികളോ റൂട്ടുകളോ പരീക്ഷിക്കുക', 'results.searchAgain': 'വീണ്ടും തിരയുക',
+   'results.plusOneDay': '+1 ദിവസം', 'results.ratingsCount': '({n} റേറ്റിംഗുകൾ)', 'results.hurryLeft': 'വേഗം! {n} മാത്രം ബാക്കി', 'results.seatsAvailable': '{n} സീറ്റുകൾ ലഭ്യമാണ്',
