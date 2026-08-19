@@ -1,0 +1,41 @@
+--- a/src/app/services/booking.service.ts	2026-08-19 07:55:04.873340741 +0000
++++ b/src/app/services/booking.service.ts	2026-08-19 07:55:11.060407584 +0000
+@@ -148,7 +148,16 @@
+   trackByPnr(pnr: string): Observable<BookingTrackingInfo> {
+     return this.http.get<{ success: boolean; data: BookingTrackingInfo }>(`${this.api}/pnr/${pnr}/track`).pipe(
+       map(res => res.data),
+-      catchError((err: HttpErrorResponse) => throwError(() => new Error(this.i18n.tErr(err, 'err.pnrNotFound'))))
++      // Preserve err.status alongside the translated message — trackByPnr's caller
++      // (bus-tracking.component) needs to tell a 400 (invalid PNR format, entered
++      // before a real lookup even happens) apart from a 404 (well-formed PNR that
++      // genuinely wasn't found) so it can show a toast for the former instead of
++      // silently falling into the same "not found" card as the latter.
++      catchError((err: HttpErrorResponse) => {
++        const wrapped: any = new Error(this.i18n.tErr(err, 'err.pnrNotFound'));
++        wrapped.status = err.status;
++        return throwError(() => wrapped);
++      })
+     );
+   }
+ 
+--- a/src/app/components/bus-tracking/bus-tracking.component.ts	2026-08-19 07:55:04.868938221 +0000
++++ b/src/app/components/bus-tracking/bus-tracking.component.ts	2026-08-19 07:55:16.179678865 +0000
+@@ -269,9 +269,16 @@
+           this.busY = 75 - (this.progress / 100) * 55;
+         }
+       },
+-      error: () => {
++      error: (err: any) => {
+         this.loading = false;
+-        this.notFound = true;
++        // A 400 (invalid PNR format) is a different situation than a 404 (well-formed
++        // PNR, genuinely no matching booking) — collapsing both into the same silent
++        // notFound=true left 400s with no visible feedback at all, since the inline
++        // "not found" card's copy only makes sense for a real, unmatched PNR. Both
++        // cases now surface err.message (already translated via tErr) as a toast; a
++        // 404 additionally shows the inline card, matching prior behavior for that case.
++        this.toast.error(err?.message || this.i18n.t('err.pnrNotFound'));
++        if (err?.status !== 400) this.notFound = true;
+       }
+     });
+   }

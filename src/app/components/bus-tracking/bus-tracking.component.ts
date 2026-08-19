@@ -28,7 +28,7 @@ import { BookingService, BookingTrackingInfo } from '../../services/booking.serv
       <div class="container" style="padding:32px 16px 0;" *ngIf="notFound">
         <div class="rb-card" style="padding:32px; text-align:center;">
           <i class="fa fa-exclamation-circle fa-2x" style="color:#d84e55;"></i>
-          <p style="margin-top:12px; font-weight:600;">{{i18n.t('tracking.pnrNotFound')}}</p>
+          <p style="margin-top:12px; font-weight:600;">{{trackingErrorMessage}}</p>
         </div>
       </div>
 
@@ -229,6 +229,7 @@ export class BusTrackingComponent {
   loading = false;
   tracked = false;
   notFound = false;
+  trackingErrorMessage = '';
   booking: BookingTrackingInfo | null = null;
   busX = 15; busY = 75;
 
@@ -251,6 +252,7 @@ export class BusTrackingComponent {
     this.loading = true;
     this.tracked = false;
     this.notFound = false;
+    this.trackingErrorMessage = '';
 
     // Findings #31 / #35: this used to skip lookup entirely (fixed, fake data) or —
     // after the correct-but-conflicting IDOR fix on getByPnr() — require login and
@@ -269,9 +271,19 @@ export class BusTrackingComponent {
           this.busY = 75 - (this.progress / 100) * 55;
         }
       },
-      error: () => {
+      error: (err: any) => {
         this.loading = false;
-        this.notFound = true;
+        // A 400 (invalid PNR format) is a different situation than a 404 (well-formed
+        // PNR, genuinely no matching booking) — collapsing both into the same silent
+        // notFound=true left 400s with no visible feedback at all, since the inline
+        // "not found" card's copy only makes sense for a real, unmatched PNR. Both
+        // cases now surface err.message (already translated via tErr) as a toast; a
+        // 404 additionally shows the inline card, matching prior behavior for that case.
+        // trackingErrorMessage feeds the inline card too, so it matches the toast
+        // instead of showing a fixed generic line regardless of what actually failed.
+        this.trackingErrorMessage = err?.message || this.i18n.t('err.pnrNotFound');
+        this.toast.error(this.trackingErrorMessage);
+        if (err?.status !== 400) this.notFound = true;
       }
     });
   }

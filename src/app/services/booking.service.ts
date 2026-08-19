@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, of, throwError } from 'rxjs';
-import { catchError, tap, map } from 'rxjs/operators';
+import { Observable, of, throwError, TimeoutError } from 'rxjs';
+import { catchError, tap, map, timeout } from 'rxjs/operators';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Booking } from '../models/bus.model';
 import { environment } from '../../environments/environment';
@@ -147,8 +147,28 @@ export class BookingService {
    *  tracking view needs, never passenger/contact/payment details (see server route). */
   trackByPnr(pnr: string): Observable<BookingTrackingInfo> {
     return this.http.get<{ success: boolean; data: BookingTrackingInfo }>(`${this.api}/pnr/${pnr}/track`).pipe(
+      // Backend hosting (e.g. Render's free tier) can take 50s+ to wake from sleep on a
+      // cold request — without this, that hang was indistinguishable from the UI just
+      // being stuck, with no feedback either way. 20s is generous enough not to false-
+      // positive on a slow-but-working request, short enough to not feel broken.
+      timeout(20000),
       map(res => res.data),
-      catchError((err: HttpErrorResponse) => throwError(() => new Error(this.i18n.tErr(err, 'err.pnrNotFound'))))
+      // Preserve err.status alongside the translated message — trackByPnr's caller
+      // (bus-tracking.component) needs to tell a 400 (invalid PNR format, entered
+      // before a real lookup even happens) apart from a 404 (well-formed PNR that
+      // genuinely wasn't found) so it can show a toast for the former instead of
+      // silently falling into the same "not found" card as the latter.
+      catchError((err: unknown) => {
+        if (err instanceof TimeoutError) {
+          const wrapped: any = new Error(this.i18n.t('err.trackingTimeout'));
+          wrapped.status = 0;
+          return throwError(() => wrapped);
+        }
+        const httpErr = err as HttpErrorResponse;
+        const wrapped: any = new Error(this.i18n.tErr(httpErr, 'err.pnrNotFound'));
+        wrapped.status = httpErr.status;
+        return throwError(() => wrapped);
+      })
     );
   }
 
