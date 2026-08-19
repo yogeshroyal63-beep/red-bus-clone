@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DestroyRef, inject } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize } from 'rxjs';
+import { finalize, switchMap } from 'rxjs';
 import { BusService } from '../../services/bus.service';
 import { I18nService } from '../../services/i18n.service';
 import { ToastService } from '../../services/toast.service';
@@ -347,13 +347,37 @@ export class SearchResultsComponent implements OnInit {
   constructor(private route: ActivatedRoute, private busService: BusService, private router: Router, public i18n: I18nService, private toast: ToastService) {}
 
   ngOnInit() {
-    this.route.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
-      this.from = p['from'] || 'Bangalore';
-      this.to = p['to'] || 'Chennai';
-      this.date = p['date'] || new Date().toISOString().split('T')[0];
-      this.passengers = +p['passengers'] || 1;
-      this.buildDateRange();
-      this.loadBuses();
+    // Findings: route.queryParams can emit more than once in quick succession (initial
+    // navigation, or whenever Modify/date-tabs/filters trigger router.navigate with new
+    // params), and each emission used to fire an independent loadBuses() call with no
+    // cancellation of whatever request was already in flight. On a slow backend (e.g. a
+    // Render free-tier instance waking from sleep), an earlier request could resolve and
+    // render results while a later, still-pending duplicate had already reset `loading`
+    // back to true — leaving the skeleton stuck even though correct results were already
+    // showing underneath it. switchMap cancels the previous request outright whenever a
+    // new one starts, so only the latest query params' request can ever affect the UI.
+    this.route.queryParams.pipe(
+      takeUntilDestroyed(this.destroyRef),
+      switchMap(p => {
+        this.from = p['from'] || 'Bangalore';
+        this.to = p['to'] || 'Chennai';
+        this.date = p['date'] || new Date().toISOString().split('T')[0];
+        this.passengers = +p['passengers'] || 1;
+        this.buildDateRange();
+        this.loading = true;
+        return this.busService.searchBuses({ from: this.from, to: this.to, date: this.date })
+          .pipe(finalize(() => { this.loading = false; }));
+      })
+    ).subscribe({
+      next: (buses) => {
+        this.buses = buses;
+        this.applyFilters();
+      },
+      error: () => {
+        this.buses = [];
+        this.filteredBuses = [];
+        this.toast.error(this.i18n.t('err.network'));
+      }
     });
   }
 
@@ -364,31 +388,6 @@ export class SearchResultsComponent implements OnInit {
       const nd = new Date(d); nd.setDate(d.getDate() + i);
       this.dateRange.push({ val: nd.toISOString().split('T')[0], day: nd.toLocaleDateString('en-US',{weekday:'short'}), date: nd.toLocaleDateString('en-US',{day:'2-digit',month:'short'}) });
     }
-  }
-
-  loadBuses() {
-    this.loading = true;
-    // Was: .subscribe(buses => { ...; this.loading = false; }) — no error handler at
-    // all, and `loading` was only ever cleared inside the success callback. bus.service's
-    // own catchError normally swallows failures into a local mock-data fallback, but any
-    // exception between receiving the response and that final line (or any future path
-    // that bypasses that fallback) left `loading` stuck true forever — skeleton shown
-    // indefinitely even though `buses`/`filteredBuses` had already settled to whatever
-    // they were going to be. finalize() guarantees loading always clears, and an explicit
-    // error handler surfaces a real failure instead of leaving the page silently stuck.
-    this.busService.searchBuses({ from: this.from, to: this.to, date: this.date })
-      .pipe(finalize(() => { this.loading = false; }))
-      .subscribe({
-        next: (buses) => {
-          this.buses = buses;
-          this.applyFilters();
-        },
-        error: () => {
-          this.buses = [];
-          this.filteredBuses = [];
-          this.toast.error(this.i18n.t('err.network'));
-        }
-      });
   }
 
   applyFilters() {
@@ -416,7 +415,18 @@ export class SearchResultsComponent implements OnInit {
   toggleAmenity(a: string) { const i = this.filters.amenities.indexOf(a); i>-1 ? this.filters.amenities.splice(i,1) : this.filters.amenities.push(a); this.applyFilters(); }
   toggleRating(r: number) { const i = this.filters.ratings.indexOf(r); i>-1 ? this.filters.ratings.splice(i,1) : this.filters.ratings.push(r); this.applyFilters(); }
   clearFilters() { this.filters = { times:[], types:[], amenities:[], minPrice:100, maxPrice:3000, ratings:[] }; this.applyFilters(); }
-  changeDate(d: string) { this.date = d; this.loadBuses(); }
+  // Navigates with the new date instead of calling searchBuses() directly — this
+  // routes through the same queryParams -> switchMap pipeline in ngOnInit, so date-tab
+  // clicks get the same request-cancellation guarantee as any other param change
+  // (see the race-condition fix note in ngOnInit above) instead of a separate,
+  // uncoordinated code path that could race against it.
+  changeDate(d: string) {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { date: d },
+      queryParamsHandling: 'merge'
+    });
+  }
   goHome() { this.router.navigate(['/']); }
   selectBus(bus: Bus) { this.router.navigate(['/seats', bus.id], { queryParams: { from:this.from, to:this.to, date:this.date } }); }
   isNextDay(bus: Bus) { return bus.arrivalTime < bus.departureTime; }
