@@ -63,8 +63,12 @@ describe('Auth Routes', () => {
   });
 
   it('POST /login — rejects unknown email', async () => {
+    // Was 404 before the user-enumeration fix in auth.js (see the comment there):
+    // returning a different status for "unknown email" vs "wrong password" lets an
+    // attacker discover which emails are registered just by probing status codes.
+    // Both cases now correctly return the same 401 + generic message.
     const res = await request(app).post('/api/auth/login').send({ email: 'nobody@nowhere.com', password: 'anything' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
   it('GET /me — returns user when authenticated', async () => {

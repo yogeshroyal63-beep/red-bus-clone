@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment variables — real secrets never get committed, only .env.example does
+.env
+.env.local
+.env.*.local
+server/.env
+
+# Build output
+dist/
+/tmp
+
+# Angular
+.angular/cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor/OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/

@@ -94,6 +94,23 @@ npm install
 npm start         # → http://localhost:3000
 ```
 
+### Seeding real data into MongoDB
+
+If `MONGODB_URI` is set (see `.env.example`), the backend queries the real `buses`
+collection instead of its in-memory fallback — and returns real results only once
+that collection actually has documents in it. To populate it:
+
+```bash
+cd server
+npm install
+npm run seed      # inserts the app's curated bus data (see routes/buses.js) into MongoDB
+```
+
+Safe to re-run — it only replaces the buses it previously seeded, by id, rather than
+wiping the whole collection. Without `MONGODB_URI` set, or without running the seed
+step, the backend still works — it transparently falls back to the same in-memory
+mock data the frontend uses on its own.
+
 ## 🔌 API Endpoints
 
 ```
