@@ -1,14 +1,28 @@
-import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { NavbarComponent } from './components/navbar/navbar.component';
 import { FooterComponent } from './components/footer/footer.component';
 import { ToastComponent } from './components/shared/toast.component';
 
+// Findings: AppComponent was OnPush with a template that never changes on its own
+// (no inputs, no signals, no async pipe) — so Angular marked it dirty once at
+// bootstrap, checked it, and it never became dirty again by itself. An OnPush
+// component that isn't dirty blocks change detection for its ENTIRE subtree on the
+// next tick, including whatever <router-outlet> is currently hosting — regardless
+// of that routed component's own strategy (e.g. search-results uses default and
+// still got blocked). So an HTTP response resolving inside a routed component would
+// update its fields correctly, but the view never got re-checked, leaving the
+// skeleton/stale content on screen. Any click handled by an Angular-bound listener
+// anywhere on the page (navbar link, footer link, etc.) marks that view and its
+// ancestor chain up to root dirty, which unblocks root and lets the next tick finally
+// walk into router-outlet and render the already-correct data — hence "any click
+// anywhere" appearing to fix it. AppComponent has nothing of its own to optimize by
+// skipping checks, so it doesn't need OnPush; removing it lets default CD walk into
+// router-outlet's content every tick like normal.
 @Component({
   selector: 'app-root',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RouterOutlet, NavbarComponent, FooterComponent, CommonModule, ToastComponent],
   template: `
     <!-- Accessibility: skip to main content -->
