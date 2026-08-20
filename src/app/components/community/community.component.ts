@@ -49,7 +49,7 @@ import { AuthService } from '../../services/auth.service';
           <div class="cp-body">
             <div class="verified-notice" *ngIf="!isVerified">
               <i class="fa fa-lock text-red"></i>
-              <span>{{i18n.t('community.verifiedOnlyPost')}} <a href="#" class="text-red">{{i18n.t('community.verifyAccount')}} →</a></span>
+              <span>{{i18n.t('community.verifiedOnlyPost')}} <a routerLink="/my-bookings" class="text-red">{{i18n.t('community.verifyAccount')}} →</a></span>
             </div>
             <div *ngIf="isVerified">
               <div class="form-row-2">
