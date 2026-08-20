@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, delay, map, catchError } from 'rxjs';
+import { Observable, of, delay, map, catchError, timeout } from 'rxjs';
 import { Bus, SearchParams, Booking, Seat } from '../models/bus.model';
 import { environment } from '../../environments/environment';
 
@@ -125,9 +125,13 @@ export class BusService {
 
   searchBuses(params: SearchParams): Observable<Bus[]> {
     return this.http.get<any>(`${this.apiUrl}/buses/search`, { params: { from: params.from, to: params.to, date: params.date || '' } }).pipe(
+      timeout(20000),
       map(res => (res.data || []).map((b: any) => this.adapt(b))),
       catchError(() => {
-        // API unreachable — fall back to the local mock so the page still works offline/in dev
+        // API unreachable, erroring, or timed out waking a cold backend — fall back
+        // to the local mock so the page still works offline/in dev, and so a slow
+        // Render free-tier instance doesn't leave the search page spinning for
+        // however long a real cold start takes.
         const results = this.buses.filter(b =>
           b.from.toLowerCase().includes(params.from.toLowerCase()) &&
           b.to.toLowerCase().includes(params.to.toLowerCase())
@@ -140,6 +144,7 @@ export class BusService {
   getBusById(id: string, date?: string): Observable<Bus | undefined> {
     const params: any = date ? { date } : {};
     return this.http.get<any>(`${this.apiUrl}/buses/${id}`, { params }).pipe(
+      timeout(20000),
       map(res => this.adapt(res.data)),
       catchError(() => of(this.buses.find(b => b.id === id)))
     );

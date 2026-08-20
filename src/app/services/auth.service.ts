@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, catchError, throwError, of } from 'rxjs';
+import { Observable, tap, catchError, throwError, of, timeout, TimeoutError } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { I18nService } from './i18n.service';
 
@@ -39,15 +39,31 @@ export class AuthService {
     } catch { return null; }
   }
 
+  // Backend hosting (e.g. Render's free tier) can take 50s+ to wake from sleep on a
+  // cold request — same reasoning as trackByPnr in booking.service.ts. Without a
+  // client-side timeout, that wait was indistinguishable from the login/register
+  // button just being stuck, with no feedback either way.
+  private withColdStartTimeout<T>(obs: Observable<T>): Observable<T> {
+    return obs.pipe(
+      timeout(20000),
+      catchError((err: unknown) => {
+        if (err instanceof TimeoutError) {
+          return throwError(() => ({ error: { code: 'err.serverWaking', error: this.i18n.t('err.serverWaking') }, status: 0 }));
+        }
+        return throwError(() => err);
+      })
+    );
+  }
+
   register(payload: { name: string; email: string; mobile: string; password: string }): Observable<AuthUser> {
-    return this.http.post<any>(`${this.apiUrl}/auth/register`, payload).pipe(
+    return this.withColdStartTimeout(this.http.post<any>(`${this.apiUrl}/auth/register`, payload)).pipe(
       tap(res => this.persistSession(res.token, res.data)),
       catchError(err => throwError(() => err))
     );
   }
 
   login(payload: { email: string; password: string }): Observable<AuthUser> {
-    return this.http.post<any>(`${this.apiUrl}/auth/login`, payload).pipe(
+    return this.withColdStartTimeout(this.http.post<any>(`${this.apiUrl}/auth/login`, payload)).pipe(
       tap(res => this.persistSession(res.token, res.data)),
       catchError(err => throwError(() => err))
     );
