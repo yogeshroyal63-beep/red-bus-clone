@@ -140,7 +140,8 @@ import { Bus } from '../../models/bus.model';
         </div>
 
         <!-- Bus Cards -->
-        <div class="bus-card rb-card" *ngFor="let bus of filteredBuses; trackBy: trackBusId">
+        <ng-container *ngIf="!loading">
+          <div class="bus-card rb-card" *ngFor="let bus of filteredBuses; trackBy: trackBusId">
           <div class="bus-card-main">
             <div class="bus-operator">
               <div class="op-logo">{{bus.name[0]}}</div>
@@ -209,6 +210,7 @@ import { Bus } from '../../models/bus.model';
             </div>
           </div>
         </div>
+        </ng-container>
       </div>
     </div>
   `,
