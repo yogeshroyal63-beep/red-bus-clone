@@ -10,6 +10,10 @@ const deliveryLogSchema = new mongoose.Schema({
   success: Boolean,
   error: String,
   title: String,
+  // Retry mechanism: which attempt (1 = first try, 2+ = a real retry) this log row
+  // represents, so a failed-then-succeeded channel shows its full retry history
+  // instead of a single row.
+  attempt: { type: Number, default: 1 },
   timestamp: { type: Date, default: Date.now }
 });
 

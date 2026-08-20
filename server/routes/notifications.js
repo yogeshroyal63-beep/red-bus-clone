@@ -41,40 +41,69 @@ const CHANNEL_SIMULATORS = {
   }
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Spec fix: "retry mechanisms for failed deliveries" previously only existed as a
+// message string ("Retry scheduled") — nothing ever actually retried. This now
+// really re-attempts a failed channel up to MAX_RETRIES times with exponential
+// backoff, and every attempt (including the retries) is written to the delivery
+// log with its attempt number, so the log shows genuine retry history rather than
+// a single failed row.
+const MAX_RETRIES = 2; // i.e. up to 3 attempts total per channel
+const RETRY_BASE_DELAY_MS = 300;
+
+async function deliverWithRetry(channel, notif, notificationId, dbConnected) {
+  const simulator = CHANNEL_SIMULATORS[channel];
+  if (!simulator) return null;
+
+  let lastResult = null;
+  let attempts = 0;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    attempts = attempt;
+    try {
+      lastResult = await simulator(notif);
+    } catch (err) {
+      lastResult = { channel, success: false, timestamp: new Date(), error: err.message };
+    }
+
+    await recordDelivery({
+      notificationId, channel, success: lastResult.success,
+      timestamp: lastResult.timestamp, title: notif.title,
+      attempt, error: lastResult.error
+    }, dbConnected);
+
+    if (lastResult.success) break;
+    if (attempt <= MAX_RETRIES) await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+  }
+
+  return { ...lastResult, attempts, retried: attempts > 1 };
+}
+
 // POST /api/notifications/send — dispatch notification through channels
 // FIX: this had no auth check at all — anyone could trigger sends for any user.
 router.post('/send', verifyToken, async (req, res) => {
   const { notificationId, channels = ['push'], title, message } = req.body;
   if (!title || !message) return res.status(400).json({ error: 'title and message required' });
 
-  const results = [];
-  const failed = [];
+  const results = await Promise.all(
+    channels.map((channel) => deliverWithRetry(channel, { title, message }, notificationId, req.dbConnected))
+  );
 
-  for (const channel of channels) {
-    const simulator = CHANNEL_SIMULATORS[channel];
-    if (!simulator) continue;
-
-    try {
-      const result = await simulator({ title, message });
-      results.push(result);
-      if (!result.success) failed.push(channel);
-
-      await recordDelivery({
-        notificationId, channel, success: result.success,
-        timestamp: result.timestamp, title
-      }, req.dbConnected);
-    } catch (err) {
-      failed.push(channel);
-      await recordDelivery({ notificationId, channel, success: false, error: err.message, timestamp: new Date() }, req.dbConnected);
-    }
-  }
+  const attempted = results.filter(Boolean);
+  const delivered = attempted.filter(r => r.success);
+  const failed = attempted.filter(r => !r.success);
+  const retriedChannels = attempted.filter(r => r.retried).map(r => r.channel);
 
   const allDelivered = failed.length === 0;
   res.status(allDelivered ? 200 : 207).json({
     success: allDelivered,
-    delivered: results.filter(r => r.success).map(r => r.channel),
-    failed,
-    message: allDelivered ? 'Delivered on all channels' : `Failed on: ${failed.join(', ')}. Retry scheduled.`
+    delivered: delivered.map(r => r.channel),
+    failed: failed.map(r => r.channel),
+    retried: retriedChannels,
+    message: allDelivered
+      ? (retriedChannels.length ? `Delivered on all channels (retried: ${retriedChannels.join(', ')})` : 'Delivered on all channels')
+      : `Failed on: ${failed.map(r => r.channel).join(', ')} after ${MAX_RETRIES + 1} attempts each.`
   });
 });
 

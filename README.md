@@ -21,7 +21,7 @@ notification prefs) require a real logged-in account — see `/login`.
 | `/track` | Bus Tracking | Animated map, live location simulation, stops timeline |
 | `/notifications` | Notifications | Multi-channel feed, preferences panel, delivery status |
 | `/community` | Community | Posts, likes, comments, forums, trending tags, top contributors |
-| `/route-planner` | Route Planner | Interactive SVG map, waypoints, traffic comparison, saved routes |
+| `/route-planner` | Route Planner | Interactive Leaflet/OSM map, waypoints, live traffic comparison, saved routes |
 
 ## ✅ All 6 Spec Features Implemented
 
@@ -42,6 +42,7 @@ notification prefs) require a real logged-in account — see `/login`.
 - Unread count badge on navbar bell
 - Mark all read, delete individual
 - Full notification history
+- Automatic retry with exponential backoff for failed deliveries (up to 3 attempts per channel, each attempt logged)
 
 ### 3. Internationalization (i18n)
 - 6 languages: English, Hindi (हिन्दी), Tamil (தமிழ்), Telugu (తెలుగు), Kannada (ಕನ್ನಡ), Malayalam (മലയാളം)
@@ -53,12 +54,12 @@ notification prefs) require a real logged-in account — see `/login`.
 ### 4. Interactive Route Planner
 - City autocomplete for origin + destination
 - Add up to 3 stopovers (waypoints)
-- Animated SVG route map with live bus movement
-- Real-time traffic: light / moderate / heavy
+- Real map rendering via Leaflet + OpenStreetMap tiles, with live road-following routes from OSRM and geocoding via Nominatim (falls back to a straight line, clearly disclosed, if OSRM is unreachable)
+- Real-time traffic via TomTom's Traffic Flow API when `TRAFFIC_API_KEY` is set, otherwise a clearly-labeled simulation (`source: 'simulated'` vs `'tomtom'` in the API response)
 - 3 route options with distance, time, fare comparison
 - Sort by: fastest, cheapest, least traffic
 - Save routes to localStorage for quick reuse
-- Dynamic traffic alerts (simulated)
+- Dynamic traffic alerts
 - Alternative route display
 
 ### 5. Dark Mode
@@ -114,13 +115,60 @@ mock data the frontend uses on its own.
 ## 🔌 API Endpoints
 
 ```
-GET  /api/buses/search?from=&to=&date=
-GET  /api/buses/:id
-POST /api/bookings
-GET  /api/bookings/pnr/:pnr
-PUT  /api/bookings/:id/cancel
+Auth
 POST /api/auth/register
 POST /api/auth/login
+GET  /api/auth/me
+PUT  /api/auth/me/preferences
+POST /api/auth/logout
+
+Buses
+GET  /api/buses/search?from=&to=&date=
+GET  /api/buses/:id
+GET  /api/buses/
+POST /api/buses/                              (admin)
+
+Seats
+POST   /api/seats/lock
+DELETE /api/seats/lock
+GET    /api/seats/:busId/availability
+
+Bookings
+POST /api/bookings/
+GET  /api/bookings/pnr/:pnr/track
+GET  /api/bookings/pnr/:pnr
+GET  /api/bookings/my
+PUT  /api/bookings/:id/cancel
+
+Reviews
+GET  /api/reviews/:busId
+POST /api/reviews/
+PUT  /api/reviews/:id
+POST /api/reviews/:id/helpful
+POST /api/reviews/:id/report
+GET  /api/reviews/moderation/queue           (admin)
+POST /api/reviews/:id/moderate               (admin)
+
+Community
+GET  /api/community/posts
+POST /api/community/posts
+POST /api/community/posts/:id/like
+POST /api/community/posts/:id/comments
+POST /api/community/posts/:postId/comments/:commentId/like
+POST /api/community/posts/:id/report
+GET  /api/community/moderation/queue          (admin)
+POST /api/community/posts/:id/moderate        (admin)
+GET  /api/community/forums
+
+Notifications
+POST /api/notifications/send
+GET  /api/notifications/log                   (admin)
+GET  /api/notifications/history
+PUT  /api/notifications/history
+
+Traffic
+GET  /api/traffic/flow?lat=&lng=
+
 GET  /api/health
 ```
 
@@ -134,4 +182,4 @@ GET  /api/health
 | i18n | Custom signal-based service (6 languages) |
 | Backend | Express 4.19 + MongoDB/Mongoose |
 | Icons | Font Awesome 6.5 |
-| Map | SVG (no external map API required) |
+| Map & Routing | Leaflet + OpenStreetMap tiles, OSRM (routing), Nominatim (geocoding), TomTom Traffic Flow API (optional live traffic) |

@@ -70,6 +70,22 @@ describe('Notifications Routes', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
   });
 
+  // Retry mechanism fix: a failed channel attempt must genuinely retry (multiple
+  // logged attempts for the same notificationId+channel), not just say "Retry
+  // scheduled" without doing anything. SMS has the highest simulated failure rate,
+  // so sending enough of them makes at least one retry statistically certain.
+  it('POST /api/notifications/send — retries a failed channel and logs each attempt', async () => {
+    for (let i = 0; i < 25; i++) {
+      await request(app).post('/api/notifications/send').send({
+        notificationId: `retry_test_${i}`, channels: ['sms'],
+        title: 'Retry test', message: 'Retry test message'
+      });
+    }
+    const log = (await request(app).get('/api/notifications/log')).body.data;
+    const retryRows = log.filter(r => r.notificationId?.startsWith('retry_test_') && r.attempt > 1);
+    expect(retryRows.length).toBeGreaterThan(0);
+  });
+
   it('GET /api/notifications/log — log grows after a send', async () => {
     const before = (await request(app).get('/api/notifications/log')).body.data.length;
     await request(app).post('/api/notifications/send').send({
