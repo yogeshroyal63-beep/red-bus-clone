@@ -6,9 +6,20 @@ const { body, param, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 
 // In-memory seat lock store (use Redis in production)
-// Map: "busId:seatNumber" -> { userId, sessionId, lockToken, lockedAt, expiresAt }
+// Map: "busId:date:seatNumber" -> { userId, sessionId, lockToken, lockedAt, expiresAt }
+// date is included so a hold on one journey date never blocks or shows as taken on a
+// different date for the same bus — a recurring route (e.g. VRL's daily Bangalore→
+// Chennai service) is one Bus document shared across every date it runs, so without
+// date in the key, locking seat 5 for tomorrow would incorrectly show it as held for
+// next month too. Callers that don't send date (older clients, or the existing test
+// suite) fall back to '' — consistent within themselves, so behavior for those callers
+// is unchanged from before this fix; only callers that do send date get real isolation.
 const seatLocks = new Map();
 const LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function lockKey(busId, date, seatNum) {
+  return `${busId}:${date || ''}:${seatNum}`;
+}
 
 // Cleanup expired locks every 60 seconds.
 // .unref() so this timer alone doesn't keep the Node process (or a Jest run
@@ -33,13 +44,13 @@ router.post('/lock', seatLimiter, optionalAuth, [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(422).json({ error: 'Validation failed', details: errors.array() });
 
-  const { busId, seats, sessionId } = req.body;
+  const { busId, seats, sessionId, date } = req.body;
   const userId = req.userId || sessionId;
   const now = Date.now();
   const conflicts = [];
 
   for (const seatNum of seats) {
-    const key = `${busId}:${seatNum}`;
+    const key = lockKey(busId, date, seatNum);
     const existing = seatLocks.get(key);
     if (existing && existing.expiresAt > now && existing.userId !== userId) {
       conflicts.push({ seat: seatNum, expiresIn: Math.ceil((existing.expiresAt - now) / 1000) + 's' });
@@ -63,7 +74,7 @@ router.post('/lock', seatLimiter, optionalAuth, [
   const expiresAt = now + LOCK_TTL_MS;
   const lockToken = crypto.randomBytes(24).toString('hex');
   for (const seatNum of seats) {
-    seatLocks.set(`${busId}:${seatNum}`, { userId, sessionId, lockToken, lockedAt: now, expiresAt });
+    seatLocks.set(lockKey(busId, date, seatNum), { userId, sessionId, lockToken, lockedAt: now, expiresAt });
   }
 
   res.json({
@@ -83,12 +94,12 @@ router.delete('/lock', optionalAuth, [
   body('sessionId').notEmpty(),
   body('lockToken').notEmpty().withMessage('lockToken required'),
 ], (req, res) => {
-  const { busId, seats, sessionId, lockToken } = req.body;
+  const { busId, seats, sessionId, lockToken, date } = req.body;
   const userId = req.userId || sessionId;
   let released = 0;
 
   for (const seatNum of seats) {
-    const key = `${busId}:${seatNum}`;
+    const key = lockKey(busId, date, seatNum);
     const lock = seatLocks.get(key);
     // Require the server-issued lockToken to match, not just the client-supplied
     // sessionId/userId — closes the hijack path in Finding N.
@@ -101,22 +112,24 @@ router.delete('/lock', optionalAuth, [
   res.json({ success: true, released, message: `${released} seat(s) released.` });
 });
 
-// GET /api/seats/:busId/availability — get real-time seat status
+// GET /api/seats/:busId/availability?date=YYYY-MM-DD — get real-time seat status
 router.get('/:busId/availability', (req, res) => {
   const { busId } = req.params;
+  const { date } = req.query;
   const now = Date.now();
   const lockedSeats = [];
+  const prefix = `${busId}:${date || ''}:`;
 
   for (const [key, lock] of seatLocks.entries()) {
-    if (key.startsWith(`${busId}:`) && lock.expiresAt > now) {
+    if (key.startsWith(prefix) && lock.expiresAt > now) {
       lockedSeats.push({
-        seat: key.split(':')[1],
+        seat: key.slice(prefix.length),
         expiresIn: Math.ceil((lock.expiresAt - now) / 1000) + 's'
       });
     }
   }
 
-  res.json({ success: true, busId, lockedSeats, timestamp: new Date().toISOString() });
+  res.json({ success: true, busId, date: date || null, lockedSeats, timestamp: new Date().toISOString() });
 });
 
 module.exports = router;
@@ -129,9 +142,9 @@ module.exports = router;
 // can't be reused, and returns true. Returns false — and leaves locks untouched — on any
 // mismatch, so the caller can reject the booking without silently releasing someone
 // else's real hold.
-function verifyAndConsumeLocks(busId, seats, userId, lockToken) {
+function verifyAndConsumeLocks(busId, date, seats, userId, lockToken) {
   if (!lockToken) return false;
-  const keys = seats.map(s => `${busId}:${s}`);
+  const keys = seats.map(s => lockKey(busId, date, s));
   const now = Date.now();
   for (const key of keys) {
     const lock = seatLocks.get(key);

@@ -85,4 +85,27 @@ describe('Seats Routes', () => {
     expect(Array.isArray(res.body.lockedSeats)).toBe(true);
     expect(res.body.busId).toBe('bus1');
   });
+
+  // A Bus document is a recurring route/schedule shared across every date it runs
+  // (see seed.js) — locking seat E1 for one journey date must never make it appear
+  // locked, or block another user from locking it, on a different date for that same
+  // bus. Without date in the lock key this would incorrectly conflict across dates.
+  it('POST /api/seats/lock — a lock on one date does not conflict with the same seat on a different date', async () => {
+    const lockDay1 = await request(app).post('/api/seats/lock').send({
+      busId: 'bus_dated', seats: ['E1'], sessionId: 'sess_day1', date: '2026-09-01'
+    });
+    expect(lockDay1.status).toBe(200);
+
+    const lockDay2 = await request(app).post('/api/seats/lock').send({
+      busId: 'bus_dated', seats: ['E1'], sessionId: 'sess_day2', date: '2026-09-02'
+    });
+    expect(lockDay2.status).toBe(200); // different date, different user — must not conflict
+
+    const availDay1 = await request(app).get('/api/seats/bus_dated/availability').query({ date: '2026-09-01' });
+    const availDay2 = await request(app).get('/api/seats/bus_dated/availability').query({ date: '2026-09-02' });
+    expect(availDay1.body.lockedSeats.map((l) => l.seat)).toEqual(['E1']);
+    expect(availDay2.body.lockedSeats.map((l) => l.seat)).toEqual(['E1']);
+    // Each date's availability list is independent — neither leaks into the other,
+    // and each still correctly shows its own single locked seat.
+  });
 });

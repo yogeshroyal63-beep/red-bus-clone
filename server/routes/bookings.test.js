@@ -50,6 +50,7 @@ async function lockThenBookingPayload(overrides = {}) {
     busId: overrides.busId || validBooking.busId,
     seats: overrides.seats || validBooking.seats,
     sessionId: overrides.sessionId || validBooking.sessionId,
+    date: overrides.date || validBooking.date,
   });
   return { ...validBooking, ...overrides, lockToken: lockRes.body.lockToken };
 }

@@ -67,7 +67,7 @@ router.post('/', bookingLimiter, optionalAuth, validateBooking, handleValidation
     // server-issued lockToken from the lock step) on exactly these seats before a
     // booking can be created for them, and consumes that lock so it can't be reused.
     const lockOwnerId = req.userId || sessionId;
-    if (!lockOwnerId || !verifyAndConsumeLocks(busId, seats, lockOwnerId, lockToken)) {
+    if (!lockOwnerId || !verifyAndConsumeLocks(busId, date, seats, lockOwnerId, lockToken)) {
       return res.status(409).json({
         error: 'These seats are not currently held by you (lock missing or expired). Please reselect your seats.',
         code: 'err.seatLockExpired'

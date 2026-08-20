@@ -137,8 +137,9 @@ export class BusService {
     );
   }
 
-  getBusById(id: string): Observable<Bus | undefined> {
-    return this.http.get<any>(`${this.apiUrl}/buses/${id}`).pipe(
+  getBusById(id: string, date?: string): Observable<Bus | undefined> {
+    const params: any = date ? { date } : {};
+    return this.http.get<any>(`${this.apiUrl}/buses/${id}`, { params }).pipe(
       map(res => this.adapt(res.data)),
       catchError(() => of(this.buses.find(b => b.id === id)))
     );

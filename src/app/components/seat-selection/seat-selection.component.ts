@@ -2,6 +2,7 @@ import { Component, OnInit, DestroyRef, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { combineLatest } from 'rxjs';
 import { ToastService } from '../../services/toast.service';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
@@ -303,12 +304,22 @@ export class SeatSelectionComponent implements OnInit {
   constructor(private route: ActivatedRoute, private busService: BusService, private router: Router, private http: HttpClient, private toast: ToastService, public i18n: I18nService, private reviewService: ReviewService) {}
 
   ngOnInit() {
-    this.route.params.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
-      this.busService.getBusById(p['id']).subscribe(bus => {
-        if (bus) { this.bus = JSON.parse(JSON.stringify(bus)); this.buildSeatGrid(); this.reviewService.loadForBus(bus.id); }
+    // Previously params and queryParams were subscribed separately, so getBusById(id)
+    // could fire before this.date was set from queryParams — even if it hadn't, date
+    // was never passed to getBusById at all, which is what actually made seat
+    // "booked" status the same for every date (see the fix note in buses.js). Combining
+    // both here just guarantees date is known before the bus is fetched; from/to/date
+    // are still assigned exactly as before for the rest of the component to read.
+    combineLatest([this.route.params, this.route.queryParams])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([p, qp]) => {
+        this.from = qp['from'] || '';
+        this.to = qp['to'] || '';
+        this.date = qp['date'] || '';
+        this.busService.getBusById(p['id'], this.date || undefined).subscribe(bus => {
+          if (bus) { this.bus = JSON.parse(JSON.stringify(bus)); this.buildSeatGrid(); this.reviewService.loadForBus(bus.id); }
+        });
       });
-    });
-    this.route.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => { this.from=p['from']||''; this.to=p['to']||''; this.date=p['date']||''; });
   }
 
   buildSeatGrid() {
@@ -340,7 +351,8 @@ export class SeatSelectionComponent implements OnInit {
     this.http.post<any>(`${environment.apiUrl}/seats/lock`, {
       busId: this.bus!.id,
       seats: [seat.number],
-      sessionId: this.sessionId
+      sessionId: this.sessionId,
+      date: this.date
     }).subscribe({
       next: () => {
         seat.status = 'selected';
@@ -354,20 +366,41 @@ export class SeatSelectionComponent implements OnInit {
 
   private releaseSeatLock(seatNumbers: string[]) {
     this.http.delete<any>(`${environment.apiUrl}/seats/lock`, {
-      body: { busId: this.bus!.id, seats: seatNumbers, sessionId: this.sessionId }
+      body: { busId: this.bus!.id, seats: seatNumbers, sessionId: this.sessionId, date: this.date }
     }).subscribe({ error: () => {} }); // silent on release failure
   }
 
   proceedToBook() {
     if (!this.selectedBoarding || !this.selectedDropping) { this.toast.error(this.i18n.t('seat.selectBoardingDropping')); return; }
-    const bookingData = {
-      busId: this.bus!.id, busName: this.bus!.name, from: this.from, to: this.to, date: this.date,
-      departureTime: this.bus!.departureTime, arrivalTime: this.bus!.arrivalTime,
-      seats: this.selectedSeats.map(s => s.number), totalAmount: this.total,
-      boardingPoint: this.selectedBoarding, droppingPoint: this.selectedDropping, status: 'pending'
-    };
-    localStorage.setItem('rb_pending_booking', JSON.stringify(bookingData));
-    this.router.navigate(['/confirm']);
+    if (!this.selectedSeats.length) { this.toast.error(this.i18n.t('seat.noSeatsSelected')); return; }
+
+    // Per-seat acquireSeatLock() on each click already holds every selected seat
+    // individually (giving instant conflict feedback as the user picks), but each of
+    // those calls returns its own separate lockToken — booking-confirm needs exactly
+    // one token that covers the whole set (see verifyAndConsumeLocks in seats.js,
+    // and the existing lockThenBookingPayload test helper, which locks all seats in
+    // one call for this reason). Re-locking the full set here — the user already
+    // holds these seats, so this just re-affirms the same hold — produces that one
+    // consolidated token without changing the per-click UX at all.
+    const seatNumbers = this.selectedSeats.map(s => s.number);
+    this.http.post<any>(`${environment.apiUrl}/seats/lock`, {
+      busId: this.bus!.id, seats: seatNumbers, sessionId: this.sessionId, date: this.date
+    }).subscribe({
+      next: (res) => {
+        const bookingData = {
+          busId: this.bus!.id, busName: this.bus!.name, from: this.from, to: this.to, date: this.date,
+          departureTime: this.bus!.departureTime, arrivalTime: this.bus!.arrivalTime,
+          seats: seatNumbers, totalAmount: this.total,
+          boardingPoint: this.selectedBoarding, droppingPoint: this.selectedDropping, status: 'pending',
+          sessionId: this.sessionId, lockToken: res.lockToken
+        };
+        localStorage.setItem('rb_pending_booking', JSON.stringify(bookingData));
+        this.router.navigate(['/confirm']);
+      },
+      error: () => {
+        this.toast.error(this.i18n.t('seat.seatTaken'));
+      }
+    });
   }
 }
 

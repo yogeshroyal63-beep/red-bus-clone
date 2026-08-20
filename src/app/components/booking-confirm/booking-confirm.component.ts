@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ToastService } from '../../services/toast.service';
 import { I18nService } from '../../services/i18n.service';
+import { BookingService } from '../../services/booking.service';
 
 @Component({
   selector: 'app-booking-confirm',
@@ -130,8 +131,8 @@ import { I18nService } from '../../services/i18n.service';
                   <input type="checkbox" [(ngModel)]="termsAccepted" id="terms">
                   <label for="terms" class="fs-12 text-grey">{{i18n.t('confirm.agreeTo')}} <a href="#" class="text-red">{{i18n.t('footer.terms')}}</a> {{i18n.t('confirm.and')}} <a href="#" class="text-red">{{i18n.t('footer.privacyPolicy')}}</a></label>
                 </div>
-                <button class="rb-btn-primary" style="width:100%; padding:14px; font-size:15px; font-weight:700; margin-top:12px;" (click)="makePayment()" [disabled]="!termsAccepted || !selectedPayment">
-                  <i class="fa fa-lock"></i> {{i18n.t('booking.pay')}} ₹{{finalAmount}}
+                <button class="rb-btn-primary" style="width:100%; padding:14px; font-size:15px; font-weight:700; margin-top:12px;" (click)="makePayment()" [disabled]="!termsAccepted || !selectedPayment || submitting">
+                  <i class="fa" [class.fa-lock]="!submitting" [class.fa-spinner]="submitting" [class.fa-spin]="submitting"></i> {{ submitting ? i18n.t('booking.paying') : (i18n.t('booking.pay') + ' ₹' + finalAmount) }}
                 </button>
                 <div class="secure-note fs-11 text-grey">
                   <i class="fa fa-shield-alt"></i> {{i18n.t('confirm.secureNote')}}
@@ -299,7 +300,7 @@ export class BookingConfirmComponent implements OnInit {
 
   get finalAmount() { return (this.booking?.totalAmount || 0) - this.discount; }
 
-  constructor(private router: Router, private toast: ToastService, public i18n: I18nService) {}
+  constructor(private router: Router, private toast: ToastService, public i18n: I18nService, private bookingService: BookingService) {}
 
   ngOnInit() {
     const data = localStorage.getItem('rb_pending_booking');
@@ -317,24 +318,63 @@ export class BookingConfirmComponent implements OnInit {
     } else { this.toast.error(this.i18n.t('confirm.invalidCoupon')); }
   }
 
+  submitting = false;
+
   makePayment() {
     this.submitted = true;
     const allFilled = this.passengers.every(p => p.name && p.age && p.gender);
     if (!allFilled || !this.mobile || !this.email) { this.toast.error(this.i18n.t('confirm.fillAllDetails')); return; }
-    this.pnr = 'RB' + Math.random().toString(36).substr(2,8).toUpperCase();
-    // Persist the confirmed booking so reviews/community can verify it
-    const confirmedBooking = {
-      ...this.booking, pnr: this.pnr, status: 'confirmed',
-      bookingDate: new Date().toISOString()
-    };
-    try {
-      const existing: any[] = JSON.parse(localStorage.getItem('rb_bookings') || '[]');
-      existing.unshift(confirmedBooking);
-      localStorage.setItem('rb_bookings', JSON.stringify(existing.slice(0, 20)));
-      localStorage.setItem('rb_last_booking', JSON.stringify(confirmedBooking));
-    } catch {}
-    localStorage.removeItem('rb_pending_booking');
-    this.confirmed = true;
+    if (this.submitting) return; // guards against double-click while the request is in flight
+    if (!this.booking?.sessionId || !this.booking?.lockToken) {
+      // Can happen if the pending booking predates this fix, or seat locks expired
+      // (10 min TTL) before checkout was completed — send them back to re-select
+      // seats and get a fresh lock rather than posting a booking the server can only
+      // reject.
+      this.toast.error(this.i18n.t('confirm.seatLockExpired'));
+      return;
+    }
+
+    this.submitting = true;
+    this.bookingService.createBooking({
+      busId: this.booking.busId,
+      busName: this.booking.busName,
+      from: this.booking.from,
+      to: this.booking.to,
+      date: this.booking.date,
+      departureTime: this.booking.departureTime,
+      arrivalTime: this.booking.arrivalTime,
+      seats: this.booking.seats,
+      totalAmount: this.finalAmount,
+      boardingPoint: this.booking.boardingPoint,
+      droppingPoint: this.booking.droppingPoint,
+      passengerDetails: this.passengers.map(p => ({ name: p.name, age: Number(p.age), gender: p.gender, seat: p.seat })),
+      contactEmail: this.email,
+      contactPhone: this.mobile,
+      paymentMethod: this.selectedPayment,
+      sessionId: this.booking.sessionId,
+      lockToken: this.booking.lockToken
+    }).subscribe({
+      next: (saved) => {
+        this.submitting = false;
+        this.pnr = saved.pnr || '';
+        // Persist the real, server-confirmed booking so reviews/community/my-bookings'
+        // localStorage-based verification (rb_bookings) keeps working exactly as
+        // before — same key, same shape, just populated from a real booking now
+        // instead of a fake local one.
+        try {
+          const existing: any[] = JSON.parse(localStorage.getItem('rb_bookings') || '[]');
+          existing.unshift(saved);
+          localStorage.setItem('rb_bookings', JSON.stringify(existing.slice(0, 20)));
+          localStorage.setItem('rb_last_booking', JSON.stringify(saved));
+        } catch {}
+        localStorage.removeItem('rb_pending_booking');
+        this.confirmed = true;
+      },
+      error: (err) => {
+        this.submitting = false;
+        this.toast.error(err?.message || this.i18n.t('err.bookingFailed'));
+      }
+    });
   }
 
   copyPnr() { navigator.clipboard.writeText(this.pnr).catch(()=>{}); this.toast.success(this.i18n.t('confirm.pnrCopied')); }

@@ -68,6 +68,11 @@ export interface Booking {
   status: 'confirmed' | 'pending' | 'cancelled';
   bookingDate?: string;
   pnr?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  paymentMethod?: string;
+  sessionId?: string;
+  lockToken?: string;
 }
 
 export interface Passenger {

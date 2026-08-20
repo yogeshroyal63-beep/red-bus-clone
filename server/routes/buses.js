@@ -198,7 +198,7 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// GET /api/buses/:id
+// GET /api/buses/:id?date=YYYY-MM-DD
 router.get('/:id', async (req, res) => {
   try {
     let bus;
@@ -208,7 +208,39 @@ router.get('/:id', async (req, res) => {
     }
     if (!bus) bus = mockBuses.find(b => b._id === req.params.id);
     if (!bus) return res.status(404).json({ error: 'Bus not found' });
-    res.json({ success: true, data: bus });
+
+    // A Bus document is a recurring route/schedule template shared across every date
+    // it runs (see seed.js) — it has no date of its own, so "seat 5 is booked" can't
+    // live on the Bus record itself without incorrectly marking that seat booked on
+    // every future date too. The real per-date truth already exists on confirmed
+    // Booking documents (busId + date + seats), just never consulted here before.
+    // When a date is given, overlay that onto a plain-object copy of the bus's seat
+    // map for the response only — the stored Bus document is never mutated, since
+    // "booked" here is true only for this one date, not for the bus in general.
+    const { date } = req.query;
+    const plainBus = typeof bus.toObject === 'function' ? bus.toObject() : JSON.parse(JSON.stringify(bus));
+
+    if (date && Array.isArray(plainBus.seats) && plainBus.seats.length) {
+      let bookedSeatNumbers = new Set();
+      if (req.dbConnected) {
+        try {
+          const Booking = require('../models/Booking');
+          const bookings = await Booking.find({
+            busId: String(req.params.id),
+            date,
+            status: { $ne: 'cancelled' }
+          }).select('seats');
+          for (const b of bookings) for (const s of (b.seats || [])) bookedSeatNumbers.add(s);
+        } catch { /* fall through with whatever we have (possibly none found) */ }
+      }
+      if (bookedSeatNumbers.size) {
+        plainBus.seats = plainBus.seats.map(seat =>
+          bookedSeatNumbers.has(seat.number) ? { ...seat, status: 'booked' } : seat
+        );
+      }
+    }
+
+    res.json({ success: true, data: plainBus });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
