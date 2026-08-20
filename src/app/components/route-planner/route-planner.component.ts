@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { map, catchError } from 'rxjs/operators';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, forkJoin, of, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { I18nService } from '../../services/i18n.service';
 import * as L from 'leaflet';
@@ -38,7 +38,18 @@ const CITY_COORDS: Record<string, [number, number]> = {
 
 @Component({
   selector: 'app-route-planner',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  // Findings: this was OnPush, but overallTraffic/trafficSource/routeOptions/
+  // startCoord/endCoord etc. are all plain fields mutated inside async callbacks
+  // (OSRM response, the 30s traffic poll, geocodeCity()) with no signals and no
+  // ChangeDetectorRef.markForCheck() anywhere in this file. An OnPush view only gets
+  // re-checked when its OWN dirty flag is set (its own template event, an @Input
+  // change, async pipe, or a manual mark) — a click elsewhere in the app (even one
+  // that fixes a DIFFERENT OnPush-blocking issue at the root) does not mark this
+  // component dirty. So every async update here — the live traffic refresh, the OSRM
+  // route line, and now the real geocoding fix below — would silently sit in memory
+  // and only appear on screen after an incidental click within this component's own
+  // template (a sort chip, a zoom button). Removing OnPush lets default CD pick up
+  // each of these updates on its own, same as the rest of this app's non-OnPush pages.
   standalone: true,
   imports: [CommonModule, FormsModule],
   // ISSUE: replaced hand-drawn SVG mock with a real Leaflet map (OpenStreetMap tiles) below.
@@ -174,6 +185,13 @@ const CITY_COORDS: Record<string, [number, number]> = {
               <div class="map-placeholder" *ngIf="!planned">
                 <i class="fa fa-map-marked-alt"></i>
                 <span>{{i18n.t('planner.mapPlaceholder')}}</span>
+              </div>
+              <!-- Shown when a typed city couldn't be located by either the known-city
+                   table or the geocoder — the route cards below still work either way,
+                   but the map honestly says why it's empty instead of staying blank. -->
+              <div class="map-placeholder" *ngIf="planned && mapUnavailable">
+                <i class="fa fa-map-marker-alt" style="color:#d84e55;"></i>
+                <span>{{i18n.t('planner.mapUnavailable', {from: startCity, to: endCity})}}</span>
               </div>
               <!-- Traffic overlay -->
               <div class="traffic-overlay" *ngIf="planned">
@@ -401,6 +419,24 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
   /** 'osrm' = a real road-following route was drawn; 'straight-line' = OSRM was unreachable and we fell back to a straight line (now disclosed in the UI instead of silently pretending it's a road route) */
   routeSource: 'osrm' | 'straight-line' = 'osrm';
 
+  // Findings: the map used to look cities up in a small ~20-city hardcoded table
+  // (CITY_COORDS) with no fallback — a city typed that wasn't in that list (e.g.
+  // "Anantapur") made coordFor() return null, which drawRouteOnMap()/refreshTraffic()
+  // silently treated as "do nothing." The route cards still rendered fine (they're
+  // generated from the city name string, not coordinates), so nothing on screen
+  // indicated the map had failed — it just stayed on its blank default view. Start/end
+  // (and waypoint) coordinates are now resolved once per plan via geocodeCity(), which
+  // falls back to a real geocoder for anything outside the static table, and
+  // mapUnavailable is shown honestly if a place genuinely can't be found.
+  startCoord: [number, number] | null = null;
+  endCoord: [number, number] | null = null;
+  // Findings: paired with the city name (not a bare coordinate array) — a waypoint that
+  // fails to geocode used to just get filtered out of a parallel array, silently shifting
+  // every later waypoint's index and mislabeling its map popup with the wrong city name.
+  waypointCoords: { city: string; coord: [number, number] }[] = [];
+  mapUnavailable = false;
+  private geocodeCache = new Map<string, [number, number] | null>();
+
   constructor(private http: HttpClient, public i18n: I18nService) {}
 
   private map?: L.Map;
@@ -432,8 +468,32 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
     }).addTo(this.map);
   }
 
-  private coordFor(city: string): [number, number] | null {
-    return CITY_COORDS[city] || null;
+  /** Resolves a city name to real [lat, lng]. Checks the static fast-path table first
+   *  (no network, covers the cities in the dropdown), then an in-memory cache, then
+   *  falls back to OSM's Nominatim geocoder so a typed city outside that small static
+   *  list — e.g. "Anantapur" — still resolves instead of silently leaving the map
+   *  blank. Failures are cached too (as null), so a bad/unresolvable name doesn't get
+   *  re-queried on every traffic poll. */
+  private geocodeCity(city: string): Observable<[number, number] | null> {
+    const known = CITY_COORDS[city];
+    if (known) return of(known);
+
+    if (this.geocodeCache.has(city)) return of(this.geocodeCache.get(city) ?? null);
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=${encodeURIComponent(city)}`;
+    return this.http.get<any[]>(url).pipe(
+      map(results => {
+        const coord: [number, number] | null = results?.length
+          ? [parseFloat(results[0].lat), parseFloat(results[0].lon)]
+          : null;
+        this.geocodeCache.set(city, coord);
+        return coord;
+      }),
+      catchError(() => {
+        this.geocodeCache.set(city, null);
+        return of(null);
+      })
+    );
   }
 
   filterCities(e: any, field: string) {
@@ -450,10 +510,34 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.startCity || !this.endCity) return;
     this.planned = true;
     this.trafficUpdate = '';
+    this.mapUnavailable = false;
+    this.startCoord = null;
+    this.endCoord = null;
+    this.waypointCoords = [];
 
+    // Route cards don't need coordinates (generateRoutes derives everything from the
+    // city name string), so they render immediately regardless of whether the map
+    // below can resolve either place.
     this.generateRoutes();
-    this.refreshTraffic(/*isInitial*/ true);
-    this.startTrafficPolling();
+
+    const wpNames = this.waypoints.map(w => w.city).filter(Boolean);
+    forkJoin([
+      this.geocodeCity(this.startCity),
+      this.geocodeCity(this.endCity),
+      ...wpNames.map(c => this.geocodeCity(c))
+    ]).subscribe(([start, end, ...wps]) => {
+      if (!start || !end) {
+        this.mapUnavailable = true;
+        return;
+      }
+      this.startCoord = start;
+      this.endCoord = end;
+      this.waypointCoords = wpNames
+        .map((city, i) => ({ city, coord: wps[i] }))
+        .filter((w): w is { city: string; coord: [number, number] } => !!w.coord);
+      this.refreshTraffic(/*isInitial*/ true);
+      this.startTrafficPolling();
+    });
   }
 
   /** Req 4 fix: traffic used to be fetched exactly once inside planRoute(), so the "live
@@ -465,7 +549,7 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
   private refreshTraffic(isInitial = false) {
     this.fetchTrafficForAlternateRoutes();
 
-    const endCoord = this.coordFor(this.endCity);
+    const endCoord = this.endCoord;
     if (!endCoord) { if (isInitial) this.drawRouteOnMap(); return; }
 
     const previousTraffic = this.overallTraffic;
@@ -519,8 +603,8 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
    *  honestly labeled) traffic endpoint at its own approximate midpoint, so their traffic
    *  pills are independently sourced instead of fixed decoration. */
   private fetchTrafficForAlternateRoutes() {
-    const start = this.coordFor(this.startCity);
-    const end = this.coordFor(this.endCity);
+    const start = this.startCoord;
+    const end = this.endCoord;
     if (!start || !end) return;
 
     this.routeOptions.slice(1).forEach((ro, idx) => {
@@ -555,8 +639,8 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
   private drawRouteOnMap() {
     if (!this.map) return;
 
-    const startCoord = this.coordFor(this.startCity);
-    const endCoord = this.coordFor(this.endCity);
+    const startCoord = this.startCoord;
+    const endCoord = this.endCoord;
     if (!startCoord || !endCoord) return;
 
     // Clear previous route
@@ -567,9 +651,7 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
     this.busMarker?.remove();
     if (this.busAnimInterval) clearInterval(this.busAnimInterval);
 
-    const wpCoords = this.waypoints
-      .map(w => this.coordFor(w.city))
-      .filter((c): c is [number, number] => !!c);
+    const wpCoords = this.waypointCoords.map(w => w.coord);
 
     const path: [number, number][] = [startCoord, ...wpCoords, endCoord];
 
@@ -579,8 +661,8 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
     const endMarker = L.marker(endCoord).addTo(this.map).bindPopup(`<b>${this.endCity}</b> (${this.i18n.t('planner.destination')})`);
     this.markers.push(startMarker, endMarker);
 
-    wpCoords.forEach((c, i) => {
-      const m = L.marker(c).addTo(this.map!).bindPopup(`<b>${this.waypoints[i]?.city}</b> (${this.i18n.t('planner.stopover')})`);
+    this.waypointCoords.forEach(w => {
+      const m = L.marker(w.coord).addTo(this.map!).bindPopup(`<b>${w.city}</b> (${this.i18n.t('planner.stopover')})`);
       this.markers.push(m);
     });
 
@@ -591,7 +673,7 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
     // replacing the previous fake dashed line, which was just a fixed lat/lng offset with
     // no relationship to any actual road or to any of the 3 listed route options.
     this.fetchRoadGeometry(path).subscribe({
-      next: ({ main, alt }) => {
+      next: ({ main, alt, distanceMeters, durationSeconds }) => {
         this.routeSource = 'osrm';
         this.routeLine = L.polyline(main, { color: trafficColor, weight: 5, opacity: 0.85 }).addTo(this.map!);
         if (alt) {
@@ -600,6 +682,21 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
             .bindPopup(this.i18n.t('planner.altRoutePopup'));
         }
         this.animateBus(main, startCoord, endCoord);
+
+        // Finding: route 1's card ("Fastest Route") previously showed seeded-random
+        // distance/time (same routeHash() as the honestly-estimated r2/r3), despite
+        // being the one route this app actually calls a routing engine for — so
+        // "Fastest Route" could show a longer time than a slower-labeled alternative,
+        // since the two numbers had no real relationship to each other. Now that OSRM's
+        // real distance/duration for this geometry are available, route 1's card is
+        // updated to show them instead of the placeholder it was generated with.
+        const r1 = this.routeOptions.find(r => r.id === 'r1');
+        if (r1) {
+          r1.distance = `${Math.round(distanceMeters / 1000)} km`;
+          const totalMinutes = Math.round(durationSeconds / 60);
+          r1.time = `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+          this.sortRoutes();
+        }
       },
       error: () => {
         // OSRM unreachable — fall back to a straight line, but disclose that's what it is
@@ -615,8 +712,17 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Calls OSRM's public routing API for a real road-following path between the given
    *  stops, plus an alternative route when one exists. Returns Leaflet-ordered [lat,lng]
-   *  coordinate arrays. */
-  private fetchRoadGeometry(path: [number, number][]): Observable<{ main: [number, number][]; alt: [number, number][] | null }> {
+   *  coordinate arrays, PLUS the real distance (meters) and duration (seconds) OSRM
+   *  computed for that geometry.
+   *
+   *  Finding: this used to discard res.routes[0].distance/duration entirely and only
+   *  read geometry.coordinates — so the "Fastest Route" card's km/time numbers came from
+   *  the same seeded-random routeHash() as the two routes honestly labeled "estimated",
+   *  despite the code (and the UI) claiming route 1 was "the only one actually backed by
+   *  a routing engine." That's why "Fastest Route" could show a longer time than a
+   *  slower-labeled alternative — the two numbers had no real relationship to each other.
+   *  The real numbers are now returned here and used for route 1's card (see planRoute). */
+  private fetchRoadGeometry(path: [number, number][]): Observable<{ main: [number, number][]; alt: [number, number][] | null; distanceMeters: number; durationSeconds: number }> {
     const coordStr = path.map(([lat, lng]) => `${lng},${lat}`).join(';');
     const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson&alternatives=true`;
     return this.http.get<any>(url).pipe(
@@ -625,7 +731,9 @@ export class RoutePlannerComponent implements OnInit, AfterViewInit, OnDestroy {
         const toLatLng = (coords: [number, number][]): [number, number][] => coords.map(([lng, lat]) => [lat, lng]);
         return {
           main: toLatLng(res.routes[0].geometry.coordinates),
-          alt: res.routes[1] ? toLatLng(res.routes[1].geometry.coordinates) : null
+          alt: res.routes[1] ? toLatLng(res.routes[1].geometry.coordinates) : null,
+          distanceMeters: res.routes[0].distance,
+          durationSeconds: res.routes[0].duration
         };
       }),
       catchError(err => throwError(() => err))
